@@ -8,6 +8,7 @@
     "build": "npm run fonts && npm run check && vite build",
     "fonts": "node scripts/build-fonts.ts",
     "preview": "vite preview",
+    "icons": "pwa-assets-generator",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "tsc -p tsconfig.engine.json && svelte-check --tsconfig ./tsconfig.json"
@@ -15,10 +16,12 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tsconfig/svelte": "^5.0.8",
+    "@vite-pwa/assets-generator": "^1.0.4",
     "svelte": "^5.57.2",
     "svelte-check": "^4.7.7",
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
+    "vite-plugin-pwa": "^2.0.0",
     "vitest": "^4.1.11"
   }
 }
