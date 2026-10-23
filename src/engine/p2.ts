@@ -74,8 +74,19 @@ const dart: TileShape = {
 const K = (corner: number) => ({ kind: 'kite', corner });
 const D = (corner: number) => ({ kind: 'dart', corner });
 
-/** Conway's seven vertex neighbourhoods, corners listed counter-clockwise. */
-const vertexAtlas: VertexConfiguration[] = [];
+/**
+ * Conway's seven vertex neighbourhoods, corners listed counter-clockwise.
+ * Sun, jack and deuce are 'H' vertices; star, queen, king and ace are 'T'.
+ */
+const vertexAtlas: VertexConfiguration[] = [
+  { name: 'sun', corners: [K(0), K(0), K(0), K(0), K(0)] },
+  { name: 'star', corners: [D(0), D(0), D(0), D(0), D(0)] },
+  { name: 'ace', corners: [D(2), K(1), K(3)] },
+  { name: 'deuce', corners: [D(1), D(3), K(2), K(2)] },
+  { name: 'jack', corners: [D(1), K(0), K(0), D(3), K(2)] },
+  { name: 'queen', corners: [D(0), K(3), K(1), K(3), K(1)] },
+  { name: 'king', corners: [D(0), D(0), D(0), K(3), K(1)] },
+];
 
 export const P2: TileSet = {
   id: 'P2',
@@ -85,6 +96,3 @@ export const P2: TileSet = {
   cornersMatch: (a, b) => a === b,
   edgesMatch: (a, b) => a === b,
 };
-
-void K;
-void D;

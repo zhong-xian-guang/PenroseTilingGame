@@ -2,11 +2,11 @@
  * The rules engine's command/query interface. The UI talks to the game only
  * through this object.
  */
-import { placementVertices, type Placement } from './geometry';
+import { edgeDirection, placementVertices, type Placement } from './geometry';
 import { P2 } from './p2';
-import { ORIGIN, type Point } from './point';
-import { Tiling } from './tiling';
-import type { TileKind, TileSet } from './tileset';
+import { DIRECTIONS, ORIGIN, pointKey, toXY, type Point } from './point';
+import { centerOf, placementKey, Tiling } from './tiling';
+import { shapeOf, type CornerRef, type TileKind, type TileSet } from './tileset';
 
 export interface PlacedTile extends Placement {
   readonly id: number;
@@ -30,6 +30,66 @@ export interface Game {
   verticesOf(placement: Placement): Point[];
   /** Every candidate placement of `kind`: legal, non-overlapping, sharing a whole edge with the tiling. */
   candidates(kind: TileKind): readonly Placement[];
+  /**
+   * The legal orientations of `kind` at a position (a point of the tiling):
+   * every candidate placement with a corner on that point, ordered
+   * counter-clockwise around it by the direction of the tile's centre.
+   */
+  orientationsAt(position: Point, kind: TileKind): readonly Placement[];
+  /**
+   * Hit-test for the pointer (floating-point world coordinates; presentation
+   * only, never a rule decision): the candidate of `kind` whose centre is
+   * nearest `at`, within `maxDistance` length units, expressed as a position
+   * (the tiling vertex of that candidate nearest the pointer), its legal
+   * orientations, and the index of the picked one.
+   */
+  pickNear(at: { x: number; y: number }, kind: TileKind, maxDistance?: number): Pick | null;
+  /** What surrounds a vertex of the tiling, or null if no tile has a corner there. */
+  vertexAt(point: Point): VertexInfo | null;
+  /** The tile kind currently picked in the tray, if any. */
+  selectedKind(): TileKind | null;
+
+  // ---- commands ----
+  /** Pick a tile kind from the tray (or clear the pick with null). */
+  select(kind: TileKind | null): void;
+  /** Put a tile down. Returns false, changing nothing, unless it is a candidate placement. */
+  place(placement: Placement): boolean;
+
+  // ---- events ----
+  /** Listen for changes; returns an unsubscribe function. */
+  subscribe(listener: (event: GameEvent) => void): () => void;
+}
+
+export interface Pick {
+  readonly position: Point;
+  readonly orientations: readonly Placement[];
+  readonly index: number;
+}
+
+export interface VertexInfo {
+  readonly point: Point;
+  /** The tile corners on this point, counter-clockwise. */
+  readonly corners: readonly CornerRef[];
+  /** True when the corners close a full turn. */
+  readonly complete: boolean;
+  /** Name of the matching vertex-atlas entry when complete, else null. */
+  readonly configuration: string | null;
+}
+
+export type GameEvent = { readonly type: 'tiling-changed' } | { readonly type: 'selection-changed' };
+
+/** Name of the atlas entry equal to `corners` up to cyclic rotation, if any. */
+function classify(tileSet: TileSet, corners: readonly CornerRef[]): string | null {
+  const sig = (cs: readonly CornerRef[]) => cs.map((c) => `${c.kind}:${c.corner}`);
+  const mine = sig(corners);
+  for (const entry of tileSet.vertexAtlas) {
+    const theirs = sig(entry.corners);
+    if (theirs.length !== mine.length) continue;
+    for (let r = 0; r < theirs.length; r++) {
+      if (theirs.every((s, i) => s === mine[(i + r) % mine.length])) return entry.name;
+    }
+  }
+  return null;
 }
 
 export function createGame(options: GameOptions = {}): Game {
@@ -43,10 +103,88 @@ export function createGame(options: GameOptions = {}): Game {
     return { ...rec.placement, id, vertices: rec.vertices };
   };
 
+  let selected: TileKind | null = null;
+  const listeners = new Set<(event: GameEvent) => void>();
+  const emit = (event: GameEvent) => {
+    for (const l of [...listeners]) l(event);
+  };
+
+  const orientationsAt = (position: Point, kind: TileKind): Placement[] => {
+    const key = pointKey(position);
+    const at = toXY(position);
+    const angleOf = (p: Placement) => {
+      const c = centerOf(placementVertices(tileSet, p));
+      const a = Math.atan2(c.y - at.y, c.x - at.x);
+      return a < 0 ? a + 2 * Math.PI : a;
+    };
+    return tiling
+      .candidates(kind)
+      .filter((p) => placementVertices(tileSet, p).some((v) => pointKey(v) === key))
+      .map((p) => ({ p, a: angleOf(p) }))
+      .sort((x, y) => x.a - y.a)
+      .map(({ p }) => p);
+  };
+
   return {
     tileSet,
     tiles: () => tiling.tiles.map((t) => toPlaced(t.id)),
     verticesOf: (p) => placementVertices(tileSet, p),
     candidates: (kind) => tiling.candidates(kind),
+    orientationsAt,
+    pickNear(at, kind, maxDistance = 2) {
+      let best: { p: Placement; d: number } | null = null;
+      for (const p of tiling.candidates(kind)) {
+        const c = centerOf(placementVertices(tileSet, p));
+        const d = Math.hypot(c.x - at.x, c.y - at.y);
+        if (d <= maxDistance && (!best || d < best.d)) best = { p, d };
+      }
+      if (!best) return null;
+      const picked = best.p;
+      const onTiling = placementVertices(tileSet, picked).filter((v) => tiling.vertex(pointKey(v)));
+      const distTo = (v: Point) => {
+        const q = toXY(v);
+        return Math.hypot(q.x - at.x, q.y - at.y);
+      };
+      const position = onTiling.reduce((a, b) => (distTo(b) < distTo(a) ? b : a));
+      const orientations = orientationsAt(position, kind);
+      const key = placementKey(picked);
+      return { position, orientations, index: orientations.findIndex((o) => placementKey(o) === key) };
+    },
+    vertexAt(point) {
+      const rec = tiling.vertex(pointKey(point));
+      if (!rec) return null;
+      const corners = rec.corners
+        .map(({ tileId, corner }) => {
+          const t = tiling.tiles[tileId]!;
+          return { ref: { kind: t.placement.kind, corner }, out: edgeDirection(tileSet, t.placement, corner) };
+        })
+        .sort((a, b) => a.out - b.out)
+        .map((c) => c.ref);
+      const turn = corners.reduce((s, c) => s + shapeOf(tileSet, c.kind).corners[c.corner]!.angle, 0);
+      const complete = turn === DIRECTIONS;
+      return { point: rec.point, corners, complete, configuration: complete ? classify(tileSet, corners) : null };
+    },
+    selectedKind: () => selected,
+
+    select(kind) {
+      if (kind !== null && !tileSet.kinds.includes(kind)) {
+        throw new Error(`Tile set ${tileSet.id} has no tile kind "${kind}"`);
+      }
+      if (kind === selected) return;
+      selected = kind;
+      emit({ type: 'selection-changed' });
+    },
+
+    place(placement) {
+      if (!tileSet.kinds.includes(placement.kind) || !tiling.isLegal(placement)) return false;
+      tiling.add(placement);
+      emit({ type: 'tiling-changed' });
+      return true;
+    },
+
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
   };
 }

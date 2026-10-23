@@ -43,7 +43,8 @@ const edgeKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 export const placementKey = (p: Placement): string => `${p.kind}@${pointKey(p.origin)}/${mod10(p.dir)}`;
 
-function centerOf(vertices: readonly Point[]) {
+/** Floating-point centre of a polygon (culling and presentation order only). */
+export function centerOf(vertices: readonly Point[]) {
   let x = 0;
   let y = 0;
   for (const v of vertices) {

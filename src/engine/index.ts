@@ -4,7 +4,7 @@
  * Svelte dependency.
  */
 export { createGame } from './game';
-export type { Game, GameOptions, PlacedTile } from './game';
+export type { Game, GameEvent, GameOptions, Pick, PlacedTile, VertexInfo } from './game';
 export type { Placement } from './geometry';
 export { P2 } from './p2';
 export type {
