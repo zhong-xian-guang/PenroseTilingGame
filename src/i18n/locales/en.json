@@ -9,6 +9,7 @@
   "zoom.fit": "Center",
   "hint.pick": "Pick a tile below",
   "hint.place": "Hover the edge to preview · Wheel to rotate · Click to place · Drag to pan · Ctrl + wheel to zoom",
+  "hint.touch": "Drag a tile from below onto the edge · Tap the pending tile to rotate · Drag it back to remove · Drag to pan · Pinch to zoom",
   "tray.label": "Tile tray",
   "tile.kite": "Kite",
   "tile.dart": "Dart",

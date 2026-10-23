@@ -34,6 +34,8 @@
   let board: Board | null = null;
   /** A finger holds the pending tile over the tray (lifting it there removes it). */
   let removing = $state(false);
+  /** Touch-first device: show the finger controls in the hint. */
+  const coarsePointer = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 
   let offGame: (() => void) | null = null;
 
@@ -110,7 +112,9 @@
 
   <footer>
     <p class="hint">
-      {#if selected}
+      {#if coarsePointer}
+        {t('hint.touch')}
+      {:else if selected}
         {t('hint.place')}
       {:else}
         {t('hint.pick')}
