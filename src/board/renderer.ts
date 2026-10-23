@@ -27,6 +27,9 @@ export const DEFAULT_PALETTE: Palette = {
   deadEnd: '#e03131',
 };
 
+/** What the renderer reads: a live Game, or a frozen replay frame (ReplayFrame). */
+export type BoardView = Pick<Game, 'tileSet' | 'confirmedTiles' | 'pendingTile' | 'deadEnds' | 'verticesOf'>;
+
 export interface Preview {
   placement: Placement;
   position: Point;
@@ -47,7 +50,7 @@ export interface Scene {
 
 export function drawBoard(
   ctx: CanvasRenderingContext2D,
-  game: Game,
+  game: BoardView,
   camera: Camera,
   dpr: number,
   palette: Palette,
@@ -108,7 +111,7 @@ export function drawBoard(
 }
 
 /** Visible dead ends: a translucent red pocket just outside each dead edge, and the edge itself in red. */
-function drawDeadEnds(ctx: CanvasRenderingContext2D, game: Game, camera: Camera, palette: Palette): void {
+function drawDeadEnds(ctx: CanvasRenderingContext2D, game: BoardView, camera: Camera, palette: Palette): void {
   const dead = game.deadEnds();
   if (!dead.length) return;
   ctx.save();
@@ -150,7 +153,7 @@ function tracePolygon(ctx: CanvasRenderingContext2D, camera: Camera, pts: XY[]):
 
 function drawTile(
   ctx: CanvasRenderingContext2D,
-  game: Game,
+  game: BoardView,
   camera: Camera,
   palette: Palette,
   placement: Placement,

@@ -46,7 +46,8 @@ const done = (tx: IDBTransaction): Promise<void> =>
     tx.onabort = () => reject(tx.error);
   });
 
-function openDb(): Promise<IDBDatabase> {
+/** The app's database (also used by best.ts, which keeps personal bests in the `meta` store). */
+export function openDb(): Promise<IDBDatabase> {
   const r = indexedDB.open(DB_NAME, DB_VERSION);
   r.onupgradeneeded = () => {
     const db = r.result;

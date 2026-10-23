@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type Score, type TileKind } from '../engine';
+  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type GameRecord, type Score, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE } from '../board/renderer';
   import { Autosave } from '../storage/autosave';
+  import { submitScore, type BestComparison } from '../storage/best';
   import Tray from './Tray.svelte';
   import Menu from './Menu.svelte';
   import GameOverDialog from './GameOverDialog.svelte';
+  import AnalysisPage from './AnalysisPage.svelte';
   import { t } from '../i18n/index.svelte';
 
   /** A fresh game starting from a random opening patch. */
@@ -22,11 +24,25 @@
   let selected = $state<TileKind | null>(game.selectedKind());
   let score = $state<Score>(game.score());
   let over = $state(game.status() === 'over');
+  /** The finished game compared with the personal best of its tile set (submitted once per finished game). */
+  let best = $state<BestComparison | null>(null);
+  let bestFor: Game | null = null;
+  /** The analysis page is open (in place of the summary); it shows `analysisRecord`. */
+  let analysisOpen = $state(false);
+  let analysisRecord = $state.raw<GameRecord | null>(null);
 
   const recompute = () => {
     selected = game.selectedKind();
     score = game.score();
     over = game.status() === 'over';
+    if (over && bestFor !== game) {
+      const finished = game;
+      bestFor = finished;
+      best = null;
+      void submitScore(finished.tileSet.id, finished.score()).then((c) => {
+        if (game === finished) best = c;
+      });
+    }
   };
   recompute();
 
@@ -59,6 +75,7 @@
   let autosave: Autosave | null = null;
 
   const startNewGame = () => {
+    analysisOpen = false;
     game = newGame();
     attach();
     void autosave?.track(game);
@@ -155,7 +172,17 @@
     </div>
   </footer>
 
-  <GameOverDialog open={over} {score} onnewgame={startNewGame} />
+  <GameOverDialog
+    open={over && !analysisOpen}
+    {score}
+    {best}
+    ondetails={() => {
+      analysisRecord = game.record();
+      analysisOpen = true;
+    }}
+    onnewgame={startNewGame}
+  />
+  <AnalysisPage open={analysisOpen} record={analysisRecord} onback={() => (analysisOpen = false)} />
 </main>
 
 <style>
