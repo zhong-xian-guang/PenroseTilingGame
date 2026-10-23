@@ -9,6 +9,10 @@
  *                   (zooms instead when no preview is shown)
  *   ctrl/⌘ + wheel  zoom (also trackpad pinch)
  *   left click      place the previewed tile
+ *
+ * Over the pending tile (the one placed last):
+ *   wheel           cycle its legal orientations
+ *   right click     remove it
  */
 import { pointKey, toXY, type Game, type Pick, type Point } from '../engine';
 import { Camera, type XY } from './camera';
@@ -33,6 +37,8 @@ export class Board {
   private pointer: XY | null = null;
   private press: { start: XY; last: XY; dragging: boolean; id: number } | null = null;
   private hover: Hover | null = null;
+  /** The pointer is over the pending tile: it takes the wheel and right click, and no preview is shown. */
+  private overPending = false;
   private readonly cleanup: (() => void)[] = [];
 
   constructor(
@@ -126,6 +132,12 @@ export class Board {
   }
 
   private onPointerDown(e: PointerEvent): void {
+    if (e.button === 2) {
+      this.pointer = this.local(e);
+      this.updateHover();
+      if (this.overPending) this.game.removePending();
+      return;
+    }
     if (e.button !== 0 || this.press) return;
     const p = this.local(e);
     this.press = { start: p, last: p, dragging: false, id: e.pointerId };
@@ -159,13 +171,17 @@ export class Board {
       return;
     }
     const placement = this.previewPlacement();
-    if (placement) this.game.place(placement);
+    if (placement && this.hover) this.game.place(placement, this.hover.pick.position);
   }
 
   private onWheel(e: WheelEvent): void {
     e.preventDefault();
     const p = this.local(e);
     this.pointer = p;
+    if (!e.ctrlKey && !e.metaKey && this.overPending) {
+      if (e.deltaY !== 0) this.game.turnPending(e.deltaY > 0 ? 1 : -1);
+      return;
+    }
     const hover = this.hover;
     if (e.ctrlKey || e.metaKey || !hover || hover.pick.orientations.length === 0) {
       this.camera.zoomAt(p, Math.pow(WHEEL_ZOOM, -e.deltaY * (e.deltaMode === 1 ? 16 : 1)));
@@ -184,7 +200,13 @@ export class Board {
 
   private updateHover(): void {
     const kind = this.game.selectedKind();
-    if (!kind || !this.pointer || this.press?.dragging) {
+    const pending = this.game.pendingTile();
+    this.overPending =
+      !!pending &&
+      !!this.pointer &&
+      !this.press?.dragging &&
+      insidePolygon(this.camera.toWorld(this.pointer), pending.vertices.map(toXY));
+    if (!kind || !this.pointer || this.press?.dragging || this.overPending) {
       this.hover = null;
     } else {
       const world = this.camera.toWorld(this.pointer);
@@ -202,7 +224,7 @@ export class Board {
         this.hover = { pick, index: Math.max(0, pick.index) };
       }
     }
-    this.canvas.style.cursor = this.hover ? 'pointer' : 'grab';
+    this.canvas.style.cursor = this.hover || this.overPending ? 'pointer' : 'grab';
     this.requestDraw();
   }
 
@@ -210,9 +232,21 @@ export class Board {
     const placement = this.previewPlacement();
     drawBoard(this.ctx, this.game, this.camera, this.dpr, this.palette, {
       showArcs: this.showArcs,
+      pendingHovered: this.overPending,
       preview: placement && this.hover ? { placement, position: this.hover.pick.position } : null,
     });
   }
 }
 
 const samePosition = (a: Point, b: Point) => pointKey(a) === pointKey(b);
+
+/** Even-odd point-in-polygon test (pointer hit-testing only). */
+function insidePolygon(p: XY, poly: readonly XY[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]!;
+    const b = poly[j]!;
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
