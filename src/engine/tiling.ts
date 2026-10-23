@@ -39,6 +39,23 @@ interface EdgeOwner {
   readonly edge: number;
 }
 
+/** A disc in floating-point world coordinates (the growth circle). */
+export interface Disc {
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+}
+
+/** Does the segment a–b come within the disc (floating point; distance from the centre ≤ r)? */
+function segmentReachesDisc(a: Point, b: Point, d: Disc): boolean {
+  const p = toXY(a);
+  const q = toXY(b);
+  const dx = q.x - p.x;
+  const dy = q.y - p.y;
+  const t = Math.max(0, Math.min(1, ((d.x - p.x) * dx + (d.y - p.y) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(p.x + t * dx - d.x, p.y + t * dy - d.y) <= d.r;
+}
+
 const edgeKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 export const placementKey = (p: Placement): string => `${p.kind}@${pointKey(p.origin)}/${mod10(p.dir)}`;
@@ -60,6 +77,8 @@ export class Tiling {
   private readonly vertexMap = new Map<string, VertexRecord>();
   private readonly edgeMap = new Map<string, EdgeOwner[]>();
   private candidateCache = new Map<TileKind, Placement[]>();
+  /** Only boundary edges reaching into this disc take new tiles (null = no restriction). */
+  private region: Disc | null = null;
 
   constructor(readonly tileSet: TileSet) {}
 
@@ -170,6 +189,33 @@ export class Tiling {
     return true;
   }
 
+  /**
+   * Restrict growth to the boundary edges that reach into `disc` (null lifts
+   * the restriction). `candidates` and `deadEdges` look only at those edges;
+   * `isLegal` stays a pure matching/overlap test.
+   */
+  setRegion(disc: Disc | null): void {
+    const r = this.region;
+    if (r === disc || (r && disc && r.x === disc.x && r.y === disc.y && r.r === disc.r)) return;
+    this.region = disc;
+    this.candidateCache = new Map();
+  }
+
+  private inRegion(from: Point, to: Point): boolean {
+    return this.region === null || segmentReachesDisc(from, to, this.region);
+  }
+
+  /** Is `placement` glued onto at least one boundary edge inside the growth region? */
+  gluedInRegion(placement: Placement): boolean {
+    const vertices = placementVertices(this.tileSet, placement);
+    const keys = vertices.map(pointKey);
+    return keys.some((a, i) => {
+      const j = (i + 1) % keys.length;
+      const owners = this.edgeMap.get(edgeKey(a, keys[j]!));
+      return owners?.length === 1 && this.inRegion(vertices[i]!, vertices[j]!);
+    });
+  }
+
   /** Every boundary edge as (tile, edge index). A boundary edge belongs to exactly one tile. */
   *boundaryEdges(): Generator<EdgeOwner> {
     for (const owners of this.edgeMap.values()) if (owners.length === 1) yield owners[0]!;
@@ -178,7 +224,8 @@ export class Tiling {
   /**
    * Boundary edges that no tile of any kind, in any orientation, can be
    * legally glued onto. Legality only gets stricter as tiles are added, so
-   * such an edge can never be covered: a visible dead end.
+   * such an edge can never be covered: a visible dead end. Only edges inside
+   * the growth region are looked at.
    */
   deadEdges(): { from: Point; to: Point }[] {
     const ts = this.tileSet;
@@ -188,6 +235,7 @@ export class Tiling {
       const ownerEdge = shapeOf(ts, owner.placement.kind).edges[edge]!;
       const from = owner.vertices[edge]!;
       const to = owner.vertices[(edge + 1) % owner.vertices.length]!;
+      if (!this.inRegion(from, to)) continue;
       const reverseDir = edgeDirection(ts, owner.placement, edge) + 5;
       const fillable = ts.kinds.some((kind) =>
         shapeOf(ts, kind).edges.some(
@@ -202,7 +250,7 @@ export class Tiling {
     return out;
   }
 
-  /** All legal placements of `kind` (each shares at least one whole edge with the tiling). */
+  /** All legal placements of `kind` glued onto a boundary edge inside the growth region. */
   candidates(kind: TileKind): readonly Placement[] {
     const cached = this.candidateCache.get(kind);
     if (cached) return cached;
@@ -214,6 +262,7 @@ export class Tiling {
       const owner = this.records[tileId]!;
       const ownerEdge = shapeOf(ts, owner.placement.kind).edges[edge]!;
       const to = owner.vertices[(edge + 1) % owner.vertices.length]!;
+      if (!this.inRegion(owner.vertices[edge]!, to)) continue;
       const reverseDir = edgeDirection(ts, owner.placement, edge) + 5;
       shape.edges.forEach((e, j) => {
         if (!eq(e.length, ownerEdge.length) || !ts.edgesMatch(e.label, ownerEdge.label)) return;

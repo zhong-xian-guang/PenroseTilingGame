@@ -6,7 +6,19 @@
 export { createGame, replayRecord } from './game';
 export { encodeRecord, decodeRecord, RecordFormatError, RECORD_VERSION } from './record';
 export type { GameRecord, RecordStep } from './record';
-export type { DeadEnd, Game, GameEvent, GameOptions, GameStatus, Pick, PlacedTile, Score, VertexInfo } from './game';
+export type {
+  DeadEnd,
+  Game,
+  GameEvent,
+  GameOptions,
+  GameStatus,
+  GrowthCircle,
+  Pick,
+  PlacedTile,
+  Score,
+  VertexInfo,
+} from './game';
+export { GROWTH_MARGIN } from './tuning';
 export type { Placement } from './geometry';
 export { openingPatch, OPENING_MIN_TILES, OPENING_MAX_TILES } from './opening';
 export { P2 } from './p2';

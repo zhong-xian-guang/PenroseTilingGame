@@ -39,7 +39,8 @@ describe('opening patch', () => {
   it('obeys the matching rules: laying the tiles one by one, every tile is a legal placement', () => {
     for (const seed of SEEDS) {
       const [first, ...rest] = openingPatch(seed);
-      const game = createGame({ opening: [first!] });
+      // matching rules only: no growth circle
+      const game = createGame({ opening: [first!], growthMargin: Infinity });
       for (const tile of rest) expect(game.place(tile), `seed ${seed} ${keyOf(tile)}`).toBe(true);
     }
   });
