@@ -5,10 +5,10 @@
 import { edgeDirection, placementVertices, type Placement } from './geometry';
 import { P2 } from './p2';
 import { DIRECTIONS, mod10, ORIGIN, pointKey, toXY, type Point } from './point';
-import type { GameRecord, RecordStep } from './record';
+import type { GameRecord, PlayMode, RecordStep } from './record';
 import { centerOf, placementKey, Tiling } from './tiling';
 import { shapeOf, type CornerRef, type TileKind, type TileSet } from './tileset';
-import { GROWTH_MARGIN } from './tuning';
+import { FLOW_NEAR_RADIUS, GROWTH_MARGIN } from './tuning';
 
 export interface PlacedTile extends Placement {
   readonly id: number;
@@ -28,6 +28,8 @@ export interface GameOptions {
    * uses the default.
    */
   readonly growthMargin?: number;
+  /** The play mode to start in (default 'free'). */
+  readonly mode?: PlayMode;
 }
 
 export interface Game {
@@ -62,6 +64,8 @@ export interface Game {
   vertexAt(point: Point): VertexInfo | null;
   /** The tile kind currently picked in the tray, if any. */
   selectedKind(): TileKind | null;
+  /** The current play mode; every placement is recorded with the mode it was made in. */
+  mode(): PlayMode;
   /** 'playing' until a visible dead end is confirmed, then 'over' for good. */
   status(): GameStatus;
   /**
@@ -81,6 +85,16 @@ export interface Game {
    */
   growthCircle(): GrowthCircle;
   /**
+   * The flow-mode recommendation: an open spot on the boundary (a point of the
+   * tiling inside the growth circle that some candidate placement has a corner
+   * on), preferring concave ones (corners filling more than half a turn)
+   * whenever there are any. Among the spots within FLOW_NEAR_RADIUS of the last
+   * tile's centre, the one with the fewest candidates (nearer breaks ties);
+   * when none is near, the nearest one. Null when nothing is open or the game
+   * is over. Answered in either mode.
+   */
+  flowSpot(): FlowSpot | null;
+  /**
    * The game record so far: tile set, opening, and every step that changed
    * the board (places, turns and removals of the pending tile), in order.
    * `replayRecord` rebuilds this exact position from it.
@@ -88,6 +102,12 @@ export interface Game {
   record(): GameRecord;
 
   // ---- commands ----
+  /**
+   * Switch between free and flow mode, at any time (even mid-game, with a
+   * pending tile). The board does not change; only later placements are
+   * recorded with the new mode. Emits 'mode-changed' when it changes.
+   */
+  setMode(mode: PlayMode): void;
   /** Pick a tile kind from the tray (or clear the pick with null). */
   select(kind: TileKind | null): void;
   /**
@@ -154,6 +174,13 @@ export interface GrowthCircle {
   readonly radius: number;
 }
 
+export interface FlowSpot {
+  /** The recommended point of the tiling (exact). */
+  readonly position: Point;
+  /** How many candidate placements (all kinds) have a corner on it. */
+  readonly options: number;
+}
+
 export interface Score {
   readonly tiles: number;
   /** Total area in squared length units (shortest edge = 1). */
@@ -163,6 +190,7 @@ export interface Score {
 export type GameEvent =
   | { readonly type: 'tiling-changed' }
   | { readonly type: 'selection-changed' }
+  | { readonly type: 'mode-changed' }
   | { readonly type: 'game-over' };
 
 /** Name of the atlas entry equal to `corners` up to cyclic rotation, if any. */
@@ -258,6 +286,7 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   };
   syncRegion();
   let selected: TileKind | null = null;
+  let mode: PlayMode = options.mode ?? 'free';
   const steps: RecordStep[] = [];
   let status: GameStatus = 'playing';
   /** Dead edges of the current tiling, recomputed lazily after each change. */
@@ -284,12 +313,57 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
     if (event.type === 'tiling-changed') {
       syncRegion();
       deadCache = null;
+      flowCache = null;
       stuck = endIfStuck();
     }
     for (const l of [...listeners]) l(event);
     if (stuck) emit({ type: 'game-over' });
   };
   endIfStuck();
+
+  /** The flow recommendation, recomputed lazily after each change. */
+  let flowCache: { spot: FlowSpot | null } | null = null;
+  const flowSpot = (): FlowSpot | null => {
+    if (status === 'over' || tiling.tiles.length === 0) return null;
+    if (flowCache) return flowCache.spot;
+    const { center, radius } = circle();
+    const options = new Map<string, number>();
+    for (const kind of tileSet.kinds) {
+      for (const c of tiling.candidates(kind)) {
+        for (const v of placementVertices(tileSet, c)) {
+          const key = pointKey(v);
+          if (tiling.vertex(key)) options.set(key, (options.get(key) ?? 0) + 1);
+        }
+      }
+    }
+    const last = tiling.tiles[tiling.tiles.length - 1]!;
+    const ref = centerOf(last.vertices);
+    const open: { spot: FlowSpot; d: number; concave: boolean }[] = [];
+    for (const [key, n] of options) {
+      const rec = tiling.vertex(key)!;
+      const at = toXY(rec.point);
+      if (Math.hypot(at.x - center.x, at.y - center.y) > radius) continue;
+      const filled = rec.corners.reduce((s, { tileId, corner }) => {
+        const kind = tiling.tiles[tileId]!.placement.kind;
+        return s + shapeOf(tileSet, kind).corners[corner]!.angle;
+      }, 0);
+      open.push({
+        spot: { position: rec.point, options: n },
+        d: Math.hypot(at.x - ref.x, at.y - ref.y),
+        concave: 2 * filled > DIRECTIONS,
+      });
+    }
+    const concave = open.filter((s) => s.concave);
+    const pool = concave.length > 0 ? concave : open;
+    const near = pool.filter((s) => s.d <= FLOW_NEAR_RADIUS);
+    const best = (near.length > 0 ? near : pool).reduce<(typeof pool)[number] | null>((a, b) => {
+      if (!a) return b;
+      const byOptions = near.length > 0 ? b.spot.options - a.spot.options : 0;
+      return byOptions < 0 || (byOptions === 0 && b.d < a.d) ? b : a;
+    }, null);
+    flowCache = { spot: best?.spot ?? null };
+    return flowCache.spot;
+  };
 
   const orientationsAt = (position: Point, kind: TileKind): Placement[] => {
     const key = pointKey(position);
@@ -320,13 +394,13 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
       pending = null;
       status = 'over';
       finalDead = dead;
-      steps.push({ type: 'place', placement: { ...placement, dir: mod10(placement.dir) }, position: anchor });
+      steps.push({ type: 'place', placement: { ...placement, dir: mod10(placement.dir) }, position: anchor, mode });
       emit({ type: 'tiling-changed' });
       emit({ type: 'game-over' });
       return true;
     }
     pending = { id: tiling.add(placement).id, position: anchor };
-    steps.push({ type: 'place', placement: tiling.tiles[pending.id]!.placement, position: anchor });
+    steps.push({ type: 'place', placement: tiling.tiles[pending.id]!.placement, position: anchor, mode });
     emit({ type: 'tiling-changed' });
     return true;
   };
@@ -349,6 +423,13 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
     return true;
   };
 
+  const setMode = (next: PlayMode): void => {
+    if (next !== 'free' && next !== 'flow') throw new Error(`Unknown play mode "${String(next)}"`);
+    if (next === mode) return;
+    mode = next;
+    emit({ type: 'mode-changed' });
+  };
+
   const removePending = (): boolean => {
     if (pending === null) return false;
     tiling.removeLast();
@@ -361,6 +442,7 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   const apply = (step: RecordStep): boolean => {
     switch (step.type) {
       case 'place':
+        setMode(step.mode ?? 'free');
         return place(step.placement, step.position);
       case 'turn':
         return turnTo(() => step.placement);
@@ -411,6 +493,7 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
       return { point: rec.point, corners, complete, configuration: complete ? classify(tileSet, corners) : null };
     },
     selectedKind: () => selected,
+    mode: () => mode,
     status: () => status,
     deadEnds: () => {
       const cause = status === 'over' ? 'confirmed' : 'pending';
@@ -422,6 +505,7 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
       return { tiles: confirmed.length, area };
     },
     growthCircle: circle,
+    flowSpot,
     record: () => ({
       tileSet: tileSet.id,
       ...(options.seed === undefined ? {} : { seed: options.seed }),
@@ -437,6 +521,8 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
       selected = kind;
       emit({ type: 'selection-changed' });
     },
+
+    setMode,
 
     place,
 
