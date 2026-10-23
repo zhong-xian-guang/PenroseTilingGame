@@ -1,6 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type GameRecord, type Score, type TileKind } from '../engine';
+  import {
+    createGame,
+    openingPatch,
+    ORIGIN,
+    P2,
+    toXY,
+    type Game,
+    type GameRecord,
+    type PlayMode,
+    type Score,
+    type TileKind,
+  } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE, type Palette } from '../board/renderer';
   import { derivePalette } from '../settings/palette';
@@ -13,10 +24,10 @@
   import AnalysisPage from './AnalysisPage.svelte';
   import { t } from '../i18n/index.svelte';
 
-  /** A fresh game starting from a random opening patch. */
-  const newGame = (): Game => {
+  /** A fresh game starting from a random opening patch, in `mode`. */
+  const newGame = (mode: PlayMode = 'free'): Game => {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
-    return createGame({ tileSet: P2, opening: openingPatch(seed), seed });
+    return createGame({ tileSet: P2, opening: openingPatch(seed), seed, mode });
   };
 
   // The board holds the game, so a new game re-attaches it (see attach); nothing renders from game directly.
@@ -26,6 +37,10 @@
   let selected = $state<TileKind | null>(game.selectedKind());
   let score = $state<Score>(game.score());
   let over = $state(game.status() === 'over');
+  let mode = $state<PlayMode>(game.mode());
+  /** Flow mode: is there a spot to recommend, and does the selected kind fit it? */
+  let flowSpot = $state(false);
+  let flowFits = $state(false);
   /** The finished game compared with the personal best of its tile set (submitted once per finished game). */
   let best = $state<BestComparison | null>(null);
   let bestFor: Game | null = null;
@@ -37,6 +52,10 @@
     selected = game.selectedKind();
     score = game.score();
     over = game.status() === 'over';
+    mode = game.mode();
+    const spot = mode === 'flow' ? game.flowSpot() : null;
+    flowSpot = spot !== null;
+    flowFits = !!spot && !!selected && game.orientationsAt(spot.position, selected).length > 0;
     if (over && bestFor !== game) {
       const finished = game;
       bestFor = finished;
@@ -75,14 +94,13 @@
   const attach = () => {
     offGame?.();
     board?.destroy();
-    board = new Board(canvas, game);
-    board.trayElement = trayZone;
+    board = new Board(canvas, game);    board.trayElement = trayZone;
     removing = false;
     board.onTrayDropTarget = (r) => (removing = r);
     applySettings();
     offGame = game.subscribe((e) => {
       recompute();
-      if (e.type === 'selection-changed') board?.refresh();
+      if (e.type === 'selection-changed' || e.type === 'mode-changed') board?.refresh();
     });
     recompute();
   };
@@ -92,7 +110,7 @@
 
   const startNewGame = () => {
     analysisOpen = false;
-    game = newGame();
+    game = newGame(game.mode());
     attach();
     void autosave?.track(game);
   };
@@ -153,6 +171,14 @@
 
   <button type="button" class="new-game" onclick={startNewGame}>{t('game.new')}</button>
 
+  <div class="mode" role="radiogroup" aria-label={t('mode.label')}>
+    {#each ['free', 'flow'] as const as m (m)}
+      <button type="button" role="radio" aria-checked={mode === m} class:on={mode === m} onclick={() => game.setMode(m)}>
+        {t(m === 'free' ? 'mode.free' : 'mode.flow')}
+      </button>
+    {/each}
+  </div>
+
   <div class="zoom">
     <button type="button" aria-label={t('zoom.in')} onclick={() => board?.zoomBy(1.25)}>+</button>
     <button type="button" aria-label={t('zoom.out')} onclick={() => board?.zoomBy(0.8)}>−</button>
@@ -167,7 +193,13 @@
 
   <footer>
     <p class="hint">
-      {#if coarsePointer}
+      {#if mode === 'flow' && !over && !flowSpot}
+        {t('hint.flowNone')}
+      {:else if mode === 'flow' && !over && selected && !flowFits}
+        {t('hint.flowNoFit')}
+      {:else if mode === 'flow' && !over && selected}
+        {t(coarsePointer ? 'hint.flowTouch' : 'hint.flow')}
+      {:else if coarsePointer}
         {t('hint.touch')}
       {:else if selected}
         {t('hint.place')}
@@ -252,6 +284,31 @@
     font: inherit;
     font-size: 14px;
     cursor: pointer;
+  }
+  .mode {
+    position: absolute;
+    top: 108px;
+    left: 16px;
+    display: flex;
+    padding: 3px;
+    gap: 2px;
+    background: var(--panel);
+    border-radius: 12px;
+    box-shadow: 0 2px 10px #0001;
+  }
+  .mode button {
+    padding: 5px 12px;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .mode button.on {
+    background: var(--accent);
+    color: #fff;
   }
   .zoom {
     position: absolute;

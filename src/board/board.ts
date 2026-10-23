@@ -24,8 +24,27 @@
  *   drag pending    drag it onto the tray to remove it
  *   drag elsewhere  pan
  *   two fingers     pinch zoom (and pan); never places anything
+ *
+ * Flow mode (game.mode() === 'flow'): the preview does not follow the pointer;
+ * once a kind is picked it sits on the engine's recommended spot
+ * (game.flowSpot()), and the player only picks the orientation:
+ *   wheel / click / tap     next legal orientation there (a click or tap on the
+ *                           preview itself places it)
+ *   drag from tray          lifting the finger anywhere on the board places it
+ * The camera pans smoothly to the spot only when it nears the edge of the
+ * view (FLOW_PAN_MARGIN).
  */
-import { ORIGIN, pointKey, toXY, type Game, type Pick, type Placement, type Point, type TileKind } from '../engine';
+import {
+  FLOW_PAN_MARGIN,
+  ORIGIN,
+  pointKey,
+  toXY,
+  type Game,
+  type Pick,
+  type Placement,
+  type Point,
+  type TileKind,
+} from '../engine';
 import { Camera, type XY } from './camera';
 import { DEFAULT_PALETTE, drawBoard, type Palette } from './renderer';
 
@@ -33,10 +52,11 @@ const DRAG_THRESHOLD = 4; // CSS px before a press becomes a pan
 const WHEEL_ZOOM = 1.0015; // per wheel delta unit
 const TOUCH_SLOP = 10; // CSS px a finger may wander and still count as a tap
 const FINGER_LIFT = 72; // CSS px between the finger and the point it aims at
+const PAN_EASE = 0.15; // share of the remaining distance the flow-mode camera covers per frame
 
 /** What the fingers on the canvas are doing. */
 type TouchGesture =
-  | { type: 'pan'; id: number; last: XY }
+  | { type: 'pan'; id: number; start: XY; last: XY }
   /** A finger went down on the pending tile: a tap turns it, a drag carries it (to the tray to remove it). */
   | { type: 'pending'; id: number; start: XY; dragging: boolean }
   | { type: 'pinch'; dist: number; mid: XY }
@@ -83,6 +103,8 @@ export class Board {
   private trayDrag: TrayDrag | null = null;
   private trayDropTarget = false;
   private stopTrayDrag: () => void = () => {};
+  /** Where the flow-mode camera is gliding to (world point to centre), if anywhere. */
+  private panTarget: XY | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -112,11 +134,13 @@ export class Board {
     this.listen(canvas, 'wheel', (e) => this.onWheel(e), { passive: false });
     this.listen(canvas, 'contextmenu', (e) => e.preventDefault());
     this.cleanup.push(
-      game.subscribe(() => {
+      game.subscribe((e) => {
         this.hover = null;
         this.updateHover();
+        if (e.type === 'tiling-changed' || e.type === 'mode-changed') this.followFlowSpot();
       }),
     );
+    this.followFlowSpot();
   }
 
   destroy(): void {
@@ -126,6 +150,7 @@ export class Board {
   }
 
   zoomBy(factor: number): void {
+    this.panTarget = null;
     this.camera.zoomAt({ x: this.camera.width / 2, y: this.camera.height / 2 }, factor);
     this.updateHover();
   }
@@ -135,6 +160,7 @@ export class Board {
     if (!pts.length) return;
     const min = { x: Math.min(...pts.map((p) => p.x)), y: Math.min(...pts.map((p) => p.y)) };
     const max = { x: Math.max(...pts.map((p) => p.x)), y: Math.max(...pts.map((p) => p.y)) };
+    this.panTarget = null;
     this.camera.fit(min, max, 3);
     this.requestDraw();
   }
@@ -143,6 +169,7 @@ export class Board {
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
+      if (this.stepPan()) this.requestDraw();
       this.draw();
     });
   }
@@ -151,6 +178,45 @@ export class Board {
   refresh(): void {
     this.hover = null;
     this.updateHover();
+  }
+
+  private get flow(): boolean {
+    return this.game.mode() === 'flow';
+  }
+
+  /**
+   * Flow mode: when the recommended spot is near the edge of the view (or off
+   * it), start gliding the camera to centre it; otherwise leave the view alone.
+   */
+  private followFlowSpot(): void {
+    if (!this.flow || this.game.status() === 'over') return;
+    const spot = this.game.flowSpot();
+    if (!spot) return;
+    const world = toXY(spot.position);
+    const s = this.camera.toScreen(world);
+    const { width: w, height: h } = this.camera;
+    const m = Math.min(w, h) * FLOW_PAN_MARGIN;
+    if (s.x < m || s.x > w - m || s.y < m || s.y > h - m) {
+      this.panTarget = world;
+      this.requestDraw();
+    }
+  }
+
+  /** Moves the camera one frame towards panTarget; true while still moving. */
+  private stepPan(): boolean {
+    const t = this.panTarget;
+    if (!t) return false;
+    const dx = t.x - this.camera.x;
+    const dy = t.y - this.camera.y;
+    if (Math.hypot(dx, dy) * this.camera.scale < 0.5) {
+      this.camera.x = t.x;
+      this.camera.y = t.y;
+      this.panTarget = null;
+      return false;
+    }
+    this.camera.x += dx * PAN_EASE;
+    this.camera.y += dy * PAN_EASE;
+    return true;
   }
 
   private listen<K extends keyof HTMLElementEventMap>(
@@ -202,6 +268,7 @@ export class Board {
         press.dragging = true;
       }
       if (press.dragging) {
+        this.panTarget = null;
         this.camera.panBy(p.x - press.last.x, p.y - press.last.y);
         press.last = p;
         this.requestDraw();
@@ -220,8 +287,25 @@ export class Board {
       this.updateHover();
       return;
     }
+    if (this.flow) return this.flowTap(this.camera.toWorld(this.local(e)));
     const placement = this.previewPlacement();
     if (placement && this.hover) this.game.place(placement, this.hover.pick.position);
+  }
+
+  /**
+   * Flow mode click or tap at `world`: on the preview it places it; elsewhere
+   * it dials the next legal orientation at the recommended spot.
+   */
+  private flowTap(world: XY): void {
+    const hover = this.hover;
+    const placement = this.previewPlacement();
+    if (!hover || !placement || this.overPending) return;
+    if (insidePolygon(world, this.game.verticesOf(placement).map(toXY))) {
+      this.game.place(placement, hover.pick.position);
+      return;
+    }
+    hover.index = (hover.index + 1) % hover.pick.orientations.length;
+    this.requestDraw();
   }
 
   private onWheel(e: WheelEvent): void {
@@ -234,6 +318,7 @@ export class Board {
     }
     const hover = this.hover;
     if (e.ctrlKey || e.metaKey || !hover || hover.pick.orientations.length === 0) {
+      this.panTarget = null;
       this.camera.zoomAt(p, Math.pow(WHEEL_ZOOM, -e.deltaY * (e.deltaMode === 1 ? 16 : 1)));
       this.updateHover();
       return;
@@ -258,8 +343,16 @@ export class Board {
     const follow = (ev: PointerEvent) => {
       drag.finger = this.local(ev);
       drag.overTray = this.overTray(ev);
-      const pick = drag.overTray || this.game.status() === 'over' ? null : this.game.pickNear(this.camera.toWorld(aimOf(drag.finger)), kind);
-      drag.hover = pick ? { pick, index: Math.max(0, pick.index) } : null;
+      if (drag.overTray || this.game.status() === 'over') {
+        drag.hover = null;
+      } else if (this.flow) {
+        // flow mode: the tile snaps to the recommended spot wherever the finger is
+        const pick = this.flowPick(kind);
+        drag.hover = pick ? (drag.hover ?? { pick, index: 0 }) : null;
+      } else {
+        const pick = this.game.pickNear(this.camera.toWorld(aimOf(drag.finger)), kind);
+        drag.hover = pick ? { pick, index: Math.max(0, pick.index) } : null;
+      }
       this.requestDraw();
     };
     const move = (ev: PointerEvent) => {
@@ -302,7 +395,7 @@ export class Board {
       const onPending = !!pending && insidePolygon(this.camera.toWorld(p), pending.vertices.map(toXY));
       this.gesture = onPending
         ? { type: 'pending', id: e.pointerId, start: p, dragging: false }
-        : { type: 'pan', id: e.pointerId, last: p };
+        : { type: 'pan', id: e.pointerId, start: p, last: p };
     } else if (this.touches.size === 2) {
       this.setTrayDropTarget(false);
       this.gesture = this.pinchState();
@@ -318,6 +411,7 @@ export class Board {
     this.touches.set(e.pointerId, p);
     const g = this.gesture;
     if (g?.type === 'pan' && g.id === e.pointerId) {
+      this.panTarget = null;
       this.camera.panBy(p.x - g.last.x, p.y - g.last.y);
       g.last = p;
     } else if (g?.type === 'pending' && g.id === e.pointerId) {
@@ -326,6 +420,7 @@ export class Board {
     } else if (g?.type === 'pinch') {
       const next = this.pinchState();
       if (next.type === 'pinch') {
+        this.panTarget = null;
         this.camera.panBy(next.mid.x - g.mid.x, next.mid.y - g.mid.y);
         if (g.dist > 0) this.camera.zoomAt(next.mid, next.dist / g.dist);
         this.gesture = next;
@@ -340,6 +435,9 @@ export class Board {
     if (g?.type === 'pending' && g.id === e.pointerId && !cancelled) {
       if (!g.dragging) this.game.turnPending(1);
       else if (this.overTray(e)) this.game.removePending();
+    } else if (g?.type === 'pan' && g.id === e.pointerId && !cancelled && this.flow) {
+      const p = this.local(e);
+      if (Math.hypot(p.x - g.start.x, p.y - g.start.y) <= TOUCH_SLOP) this.flowTap(this.camera.toWorld(p));
     }
     this.setTrayDropTarget(false);
     // after a pinch the remaining finger does nothing until all fingers lift (no jump into a pan)
@@ -383,6 +481,14 @@ export class Board {
     return this.hover ? (this.hover.pick.orientations[this.hover.index] ?? null) : null;
   }
 
+  /** Flow mode: the recommended spot and the legal orientations of `kind` there, or null. */
+  private flowPick(kind: TileKind): Pick | null {
+    const spot = this.game.flowSpot();
+    if (!spot) return null;
+    const orientations = this.game.orientationsAt(spot.position, kind);
+    return orientations.length > 0 ? { position: spot.position, orientations, index: 0 } : null;
+  }
+
   private updateHover(): void {
     const kind = this.game.selectedKind();
     const pending = this.game.pendingTile();
@@ -392,7 +498,13 @@ export class Board {
       !this.press?.dragging &&
       insidePolygon(this.camera.toWorld(this.pointer), pending.vertices.map(toXY));
     const over = this.game.status() === 'over';
-    if (!kind || over || !this.pointer || this.press?.dragging || this.overPending) {
+    if (this.flow) {
+      // the preview sits on the recommended spot, wherever the pointer is; keep the dialled orientation
+      const pick = kind && !over ? this.flowPick(kind) : null;
+      const prev = this.hover;
+      const keep = !!pick && !!prev && samePosition(prev.pick.position, pick.position);
+      this.hover = pick ? { pick, index: keep ? Math.min(prev!.index, pick.orientations.length - 1) : 0 } : null;
+    } else if (!kind || over || !this.pointer || this.press?.dragging || this.overPending) {
       this.hover = null;
     } else {
       const world = this.camera.toWorld(this.pointer);
@@ -423,6 +535,7 @@ export class Board {
       pendingHovered: this.overPending || (g?.type === 'pending' && !g.dragging),
       preview: placement && hover ? { placement, position: hover.pick.position } : null,
       ghost: this.ghost(),
+      flowSpot: this.flow && this.game.status() === 'playing' ? (this.game.flowSpot()?.position ?? null) : null,
     });
   }
 }

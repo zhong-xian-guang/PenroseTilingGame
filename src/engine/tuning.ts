@@ -16,3 +16,11 @@ export const GROWTH_MARGIN = 1.5;
  * nearest spot. Larger = more jumping to tight spots; smaller = steadier path.
  */
 export const FLOW_NEAR_RADIUS = 2;
+
+/**
+ * Flow mode camera (presentation, kept here with the other tunables): the view
+ * pans, smoothly, to centre the recommended spot only once it comes within
+ * this fraction of the smaller viewport side of the edge (or leaves the view).
+ * Larger = pans earlier and more often; smaller = steadier view.
+ */
+export const FLOW_PAN_MARGIN = 0.18;
