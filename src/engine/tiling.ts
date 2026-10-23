@@ -102,6 +102,26 @@ export class Tiling {
     return rec;
   }
 
+  /** Takes the most recently added tile off again, undoing exactly what `add` recorded. */
+  removeLast(): TileRecord | undefined {
+    const rec = this.records.pop();
+    if (!rec) return undefined;
+    const { keys } = rec;
+    keys.forEach((k) => {
+      const v = this.vertexMap.get(k)!;
+      v.corners.pop();
+      if (v.corners.length === 0) this.vertexMap.delete(k);
+    });
+    keys.forEach((k, i) => {
+      const ek = edgeKey(k, keys[(i + 1) % keys.length]!);
+      const list = this.edgeMap.get(ek)!;
+      list.pop();
+      if (list.length === 0) this.edgeMap.delete(ek);
+    });
+    this.candidateCache = new Map();
+    return rec;
+  }
+
   /**
    * A placement is legal when it shares at least one whole edge with the
    * tiling, every corner agrees with the matching-rule label already on its
