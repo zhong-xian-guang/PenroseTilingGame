@@ -28,6 +28,7 @@
 import { ORIGIN, pointKey, toXY, type Game, type Pick, type Placement, type Point, type TileKind } from '../engine';
 import { Camera, type XY } from './camera';
 import { DEFAULT_PALETTE, drawBoard, type Palette } from './renderer';
+import { REBUILD_DELAY, TileLayer } from './tile-layer';
 
 const DRAG_THRESHOLD = 4; // CSS px before a press becomes a pan
 const WHEEL_ZOOM = 1.0015; // per wheel delta unit
@@ -64,8 +65,12 @@ export class Board {
   showArcs = true;
 
   private readonly ctx: CanvasRenderingContext2D;
+  /** Off-screen cache of the confirmed tiling (panning and zooming redraw bitmaps, not tiles). */
+  private readonly layer = new TileLayer();
   private dpr = 1;
   private frame = 0;
+  /** Timer for the redraw that rebuilds the tile cache once the zoom has settled. */
+  private settleTimer: ReturnType<typeof setTimeout> | undefined;
   private pointer: XY | null = null;
   private press: { start: XY; last: XY; dragging: boolean; id: number } | null = null;
   private hover: Hover | null = null;
@@ -121,6 +126,7 @@ export class Board {
 
   destroy(): void {
     cancelAnimationFrame(this.frame);
+    clearTimeout(this.settleTimer);
     this.stopTrayDrag();
     for (const f of this.cleanup) f();
   }
@@ -418,12 +424,17 @@ export class Board {
     const hover = this.trayDrag ? this.trayDrag.hover : this.hover;
     const placement = hover ? (hover.pick.orientations[hover.index] ?? null) : null;
     const g = this.gesture;
-    drawBoard(this.ctx, this.game, this.camera, this.dpr, this.palette, {
+    const { redrawLater, redrawNow } = drawBoard(this.ctx, this.game, this.camera, this.dpr, this.palette, {
       showArcs: this.showArcs,
       pendingHovered: this.overPending || (g?.type === 'pending' && !g.dragging),
       preview: placement && hover ? { placement, position: hover.pick.position } : null,
       ghost: this.ghost(),
+      layer: this.layer,
+      now: performance.now(),
     });
+    clearTimeout(this.settleTimer);
+    if (redrawNow) this.requestDraw();
+    else if (redrawLater) this.settleTimer = setTimeout(() => this.requestDraw(), REBUILD_DELAY + 10);
   }
 }
 

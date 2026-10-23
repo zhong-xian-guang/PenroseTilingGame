@@ -4,6 +4,7 @@
  */
 import { toXY, type Game, type Placement, type Point, type TileKind } from '../engine';
 import type { Camera, XY } from './camera';
+import type { TileLayer, View } from './tile-layer';
 
 export interface Palette {
   background: string;
@@ -46,6 +47,13 @@ export interface Scene {
    * tile being dragged back to the tray. `pts` are world coordinates.
    */
   ghost?: { placement: Placement; pts: XY[] } | null;
+  /**
+   * Off-screen cache of the confirmed tiling (see TileLayer). Without one,
+   * the confirmed tiles in view are drawn directly every frame.
+   */
+  layer?: TileLayer | null;
+  /** Frame time (ms, e.g. performance.now()); the layer uses it to tell when the zoom has settled. */
+  now?: number;
 }
 
 export function drawBoard(
@@ -55,10 +63,27 @@ export function drawBoard(
   dpr: number,
   palette: Palette,
   scene: Scene,
-): void {
+): {
+  /** The tile cache is off the camera's zoom: draw again once the zoom has settled (REBUILD_DELAY). */
+  redrawLater: boolean;
+  /** Parts of the tile cache in view are still being drawn: draw again next frame. */
+  redrawNow: boolean;
+} {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = palette.background;
   ctx.fillRect(0, 0, camera.width, camera.height);
+
+  const layer = scene.layer ?? null;
+  let redrawLater = false;
+  if (layer) {
+    const painter = (c: CanvasRenderingContext2D, view: View, tile: Placement, pts: XY[]) =>
+      drawTile(c, game, view, palette, tile, pts, scene.showArcs, 1);
+    const style = `${scene.showArcs}|${JSON.stringify(palette)}`;
+    const { snap, wantsRebuild } = layer.sync(game, camera, dpr, painter, style, scene.now ?? performance.now());
+    redrawLater = wantsRebuild;
+    // shift the whole frame by the layer's sub-pixel snap so overlays line up with the cached tiles
+    ctx.setTransform(dpr, 0, 0, dpr, snap.x, snap.y);
+  }
 
   // the growth circle: a faint dashed ring with a whisper of fill, under the tiles
   const circle = game.growthCircle();
@@ -78,8 +103,21 @@ export function drawBoard(
     ctx.restore();
   }
 
-  for (const tile of game.confirmedTiles()) {
-    drawTile(ctx, game, camera, palette, tile, tile.vertices.map(toXY), scene.showArcs, 1);
+  let redrawNow = false;
+  if (layer) {
+    const transform = ctx.getTransform();
+    redrawNow = layer.draw(ctx, camera);
+    ctx.setTransform(transform);
+  } else {
+    // no cache: draw the confirmed tiles that are in view
+    const min = camera.toWorld({ x: 0, y: camera.height });
+    const max = camera.toWorld({ x: camera.width, y: 0 });
+    for (const tile of game.confirmedTiles()) {
+      const pts = tile.vertices.map(toXY);
+      if (pts.every((p) => p.x < min.x - 1) || pts.every((p) => p.x > max.x + 1)) continue;
+      if (pts.every((p) => p.y < min.y - 1) || pts.every((p) => p.y > max.y + 1)) continue;
+      drawTile(ctx, game, camera, palette, tile, pts, scene.showArcs, 1);
+    }
   }
 
   const pending = game.pendingTile();
@@ -126,6 +164,7 @@ export function drawBoard(
     ctx.stroke();
     ctx.restore();
   }
+  return { redrawLater, redrawNow };
 }
 
 /** Visible dead ends: a translucent red pocket just outside each dead edge, and the edge itself in red. */
@@ -159,7 +198,7 @@ function drawDeadEnds(ctx: CanvasRenderingContext2D, game: Game, camera: Camera,
   ctx.restore();
 }
 
-function tracePolygon(ctx: CanvasRenderingContext2D, camera: Camera, pts: XY[]): void {
+function tracePolygon(ctx: CanvasRenderingContext2D, camera: View, pts: XY[]): void {
   ctx.beginPath();
   pts.forEach((p, i) => {
     const s = camera.toScreen(p);
@@ -172,7 +211,7 @@ function tracePolygon(ctx: CanvasRenderingContext2D, camera: Camera, pts: XY[]):
 function drawTile(
   ctx: CanvasRenderingContext2D,
   game: Game,
-  camera: Camera,
+  camera: View,
   palette: Palette,
   placement: Placement,
   pts: XY[],

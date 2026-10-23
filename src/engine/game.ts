@@ -180,25 +180,34 @@ function classify(tileSet: TileSet, corners: readonly CornerRef[]): string | nul
 }
 
 /**
- * Growth circle of a set of tiles: area-weighted centroid (shoelace) and
- * radius √(area / π) + margin. Floating point, but deterministic (IEEE-754,
- * fixed summation order), so replays agree.
+ * Running shoelace sums (area and area-weighted centroid) over a growing
+ * prefix of the tiles, for the growth circle. Floating point, but
+ * deterministic (IEEE-754, fixed summation order: tile by tile, edge by
+ * edge), so replays agree, and extending it one tile at a time gives exactly
+ * the sums of a pass over all the tiles.
  */
-function growthCircleOf(tiles: readonly { vertices: readonly Point[] }[], margin: number): GrowthCircle {
-  let area = 0;
-  let cx = 0;
-  let cy = 0;
-  for (const t of tiles) {
-    const p = t.vertices.map(toXY);
-    for (let i = 0; i < p.length; i++) {
-      const q = p[i]!;
-      const r = p[(i + 1) % p.length]!;
-      const c = q.x * r.y - r.x * q.y;
-      area += c / 2;
-      cx += ((q.x + r.x) * c) / 6;
-      cy += ((q.y + r.y) * c) / 6;
-    }
+interface Shoelace {
+  tiles: number;
+  area: number;
+  cx: number;
+  cy: number;
+}
+
+function addToShoelace(sum: Shoelace, vertices: readonly Point[]): void {
+  const p = vertices.map(toXY);
+  for (let i = 0; i < p.length; i++) {
+    const q = p[i]!;
+    const r = p[(i + 1) % p.length]!;
+    const c = q.x * r.y - r.x * q.y;
+    sum.area += c / 2;
+    sum.cx += ((q.x + r.x) * c) / 6;
+    sum.cy += ((q.y + r.y) * c) / 6;
   }
+  sum.tiles++;
+}
+
+/** Growth circle from shoelace sums: area-weighted centroid, radius √(area / π) + margin. */
+function growthCircleOf({ area, cx, cy }: Shoelace, margin: number): GrowthCircle {
   const center = area > 0 ? { x: cx / area, y: cy / area } : { x: 0, y: 0 };
   return { center, radius: Math.sqrt(area / Math.PI) + margin };
 }
@@ -238,8 +247,30 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
 
   /** The pending tile is always the last tile of the tiling; `position` is where it was attached. */
   let pending: { id: number; position: Point } | null = null;
-  const confirmed = () => tiling.tiles.filter((t) => t.id !== pending?.id);
-  const circle = () => growthCircleOf(confirmed(), margin);
+  /** The confirmed tiling is always a prefix of the tiling (the pending tile is last), and only ever grows. */
+  const confirmedCount = () => tiling.tiles.length - (pending === null ? 0 : 1);
+  const shoelace: Shoelace = { tiles: 0, area: 0, cx: 0, cy: 0 };
+  let circleCache: GrowthCircle | null = null;
+  const circle = (): GrowthCircle => {
+    const n = confirmedCount();
+    if (shoelace.tiles === n && circleCache) return circleCache;
+    while (shoelace.tiles < n) addToShoelace(shoelace, tiling.tiles[shoelace.tiles]!.vertices);
+    circleCache = growthCircleOf(shoelace, margin);
+    return circleCache;
+  };
+  /** Snapshots handed out by confirmedTiles() / tiles(), rebuilt only when the board changes. */
+  const confirmedList: PlacedTile[] = [];
+  let confirmedSnapshot: readonly PlacedTile[] = [];
+  let tilesSnapshot: readonly PlacedTile[] | null = null;
+  const confirmedTiles = (): readonly PlacedTile[] => {
+    const n = confirmedCount();
+    if (confirmedList.length === n) return confirmedSnapshot;
+    while (confirmedList.length < n) confirmedList.push(toPlaced(confirmedList.length));
+    confirmedSnapshot = confirmedList.slice();
+    return confirmedSnapshot;
+  };
+  const allTiles = (): readonly PlacedTile[] =>
+    (tilesSnapshot ??= pending === null ? confirmedTiles() : [...confirmedTiles(), toPlaced(pending.id)]);
   /** Points the tiling's growth region at the current growth circle (after the confirmed tiling changes). */
   const syncRegion = () => {
     if (margin === Infinity) return;
@@ -264,6 +295,7 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   const endIfStuck = (): boolean => {
     if (status === 'over' || tileSet.kinds.some((k) => tiling.candidates(k).length > 0)) return false;
     pending = null;
+    tilesSnapshot = null;
     status = 'over';
     syncRegion();
     deadCache = null;
@@ -272,6 +304,7 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   const emit = (event: GameEvent) => {
     let stuck = false;
     if (event.type === 'tiling-changed') {
+      tilesSnapshot = null;
       syncRegion();
       deadCache = null;
       stuck = endIfStuck();
@@ -361,8 +394,8 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
 
   const game: Game = {
     tileSet,
-    tiles: () => tiling.tiles.map((t) => toPlaced(t.id)),
-    confirmedTiles: () => tiling.tiles.filter((t) => t.id !== pending?.id).map((t) => toPlaced(t.id)),
+    tiles: allTiles,
+    confirmedTiles,
     pendingTile: () => (pending === null ? null : toPlaced(pending.id)),
     verticesOf: (p) => placementVertices(tileSet, p),
     candidates: (kind) => tiling.candidates(kind),
@@ -407,8 +440,8 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
       return deadEdges().map(({ from, to }) => ({ from, to, cause }));
     },
     score() {
-      const confirmed = tiling.tiles.filter((t) => t.id !== pending?.id);
-      const area = confirmed.reduce((s, t) => s + shapeOf(tileSet, t.placement.kind).area, 0);
+      const confirmed = confirmedTiles();
+      const area = confirmed.reduce((s, t) => s + shapeOf(tileSet, t.kind).area, 0);
       return { tiles: confirmed.length, area };
     },
     growthCircle: circle,

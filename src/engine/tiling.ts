@@ -4,9 +4,22 @@
  * Game wraps it.
  *
  * Every rule decision here uses exact ℤ[φ] arithmetic. Floating point appears
- * only as a coarse culling radius (tiles whose centroids are more than
- * NEAR_RADIUS apart cannot touch: a P2 tile's diameter is φ < 2), which can
- * only widen the set of tiles that get the exact test.
+ * only in conservative culling, which can only widen the set of tiles that
+ * get the exact test: tiles whose centres are more than NEAR_RADIUS apart
+ * cannot touch (a P2 tile's diameter is φ < 2), nor can tiles whose bounding
+ * boxes are more than BOX_SLACK apart (float error on realistic boards is
+ * many orders of magnitude below BOX_SLACK).
+ *
+ * Performance (thousands of tiles): tiles are bucketed in a uniform grid of
+ * NEAR_RADIUS-sized cells, so the overlap test only looks at the 3x3 cells
+ * around a placement. The legal placements glued onto each boundary edge are
+ * cached per edge, and a change only touches the entries of edges within
+ * INVALIDATE_RADIUS of the changed tile: a tile can only change the legality
+ * of placements it touches. Adding a tile can only make placements illegal
+ * (every check in `isLegal` gets stricter), so after `add` only the cached
+ * legal placements nearby are re-checked; after `removeLast` the nearby
+ * entries are rebuilt. `candidates` and `deadEdges` are assembled from the
+ * cache, in the same order a full scan would give.
  */
 import { edgeDirection, placementOnSegment, placementVertices, type Placement } from './geometry';
 import { mod10, orient, pointKey, strictlyInsideSegment, toXY, type Point } from './point';
@@ -14,6 +27,30 @@ import { shapeOf, type TileKind, type TileSet } from './tileset';
 import { eq } from './zphi';
 
 const NEAR_RADIUS = 4;
+const BOX_SLACK = 1e-6;
+/**
+ * Cached boundary edges whose midpoint is this close to an added/removed
+ * tile's centre are re-checked. Every point of a P2 tile lies within 1.06 of
+ * its centre (vertex average), so a tile touching a placement glued onto an
+ * edge has its centre within 1.06 + 2 · 1.06 < 3.2 of that edge's midpoint.
+ */
+const INVALIDATE_RADIUS = 3.5;
+
+/** Grid cell (side NEAR_RADIUS) as one number. */
+const cellOf = (ix: number, iy: number): number => (ix + 0x8000) * 0x10000 + (iy + 0x8000);
+
+/** A legal placement glued onto a boundary edge. */
+interface LegalOption {
+  readonly placement: Placement;
+  /** Edge keys of every boundary edge it is glued onto (more than one when it fills a notch). */
+  readonly glued: readonly string[];
+}
+
+/** What can be glued onto one boundary edge: the legal placements per tile kind, in tile-edge order. */
+interface EdgeEntry {
+  readonly mid: { x: number; y: number };
+  readonly legal: ReadonlyMap<TileKind, readonly LegalOption[]>;
+}
 
 export interface TileRecord {
   readonly id: number;
@@ -21,7 +58,38 @@ export interface TileRecord {
   readonly vertices: readonly Point[];
   readonly keys: readonly string[];
   readonly center: { x: number; y: number };
+  /** Floating-point bounding box (culling only). */
+  readonly box: Box;
 }
+
+interface Box {
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}
+
+function boxOf(vertices: readonly Point[]): Box {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const v of vertices) {
+    const { x, y } = toXY(v);
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** Are two boxes clearly apart (by more than BOX_SLACK)? Then the tiles in them cannot touch. */
+const boxesApart = (a: Box, b: Box): boolean =>
+  a.minX > b.maxX + BOX_SLACK ||
+  b.minX > a.maxX + BOX_SLACK ||
+  a.minY > b.maxY + BOX_SLACK ||
+  b.minY > a.maxY + BOX_SLACK;
 
 export interface CornerAt {
   readonly tileId: number;
@@ -76,7 +144,21 @@ export class Tiling {
   private readonly records: TileRecord[] = [];
   private readonly vertexMap = new Map<string, VertexRecord>();
   private readonly edgeMap = new Map<string, EdgeOwner[]>();
+  /**
+   * The boundary edges (one owner), kept in the edge map's order (order of
+   * first appearance), so candidates come out in the same order a scan of the
+   * edge map would give. `edgeSeq` numbers edges by first appearance; an edge
+   * uncovered again by `removeLast` is re-sorted into place lazily.
+   */
+  private boundary = new Map<string, EdgeOwner>();
+  private boundaryUnordered = false;
+  private readonly edgeSeq = new Map<string, number>();
+  private nextEdgeSeq = 0;
   private candidateCache = new Map<TileKind, Placement[]>();
+  /** Tile ids by the grid cell of their centre (see cellOf). */
+  private readonly grid = new Map<number, number[]>();
+  /** Per boundary edge (by edge key): the placements that could go there. Invalidated locally. */
+  private readonly edgeCache = new Map<string, EdgeEntry>();
   /** Only boundary edges reaching into this disc take new tiles (null = no restriction). */
   private region: Disc | null = null;
 
@@ -101,6 +183,7 @@ export class Tiling {
       vertices,
       keys,
       center: centerOf(vertices),
+      box: boxOf(vertices),
     };
     this.records.push(rec);
     keys.forEach((k, i) => {
@@ -113,12 +196,63 @@ export class Tiling {
     });
     keys.forEach((k, i) => {
       const ek = edgeKey(k, keys[(i + 1) % keys.length]!);
-      const list = this.edgeMap.get(ek) ?? [];
+      let list = this.edgeMap.get(ek);
+      if (!list) {
+        list = [];
+        this.edgeMap.set(ek, list);
+        this.edgeSeq.set(ek, this.nextEdgeSeq++);
+      }
       list.push({ tileId: rec.id, edge: i });
-      this.edgeMap.set(ek, list);
+      if (list.length === 1) this.boundary.set(ek, list[0]!);
+      else this.boundary.delete(ek);
     });
-    this.candidateCache = new Map();
+    const cell = this.cellKey(rec.center);
+    const bucket = this.grid.get(cell);
+    if (bucket) bucket.push(rec.id);
+    else this.grid.set(cell, [rec.id]);
+    this.changedNear(rec, true);
     return rec;
+  }
+
+  private cellKey(p: { x: number; y: number }): number {
+    return cellOf(Math.floor(p.x / NEAR_RADIUS), Math.floor(p.y / NEAR_RADIUS));
+  }
+
+  /**
+   * A tile was added or removed: bring the cached entries near it up to date.
+   * After an add, the legal placements nearby are re-checked (none can have
+   * become legal); after a removal, nearby entries are dropped and rebuilt
+   * on demand.
+   */
+  private changedNear(rec: TileRecord, added: boolean): void {
+    this.candidateCache = new Map();
+    const { x, y } = rec.center;
+    for (const [ek, entry] of this.edgeCache) {
+      if (Math.hypot(entry.mid.x - x, entry.mid.y - y) > INVALIDATE_RADIUS) continue;
+      if (!added || !this.boundary.has(ek)) {
+        this.edgeCache.delete(ek);
+        continue;
+      }
+      const legal = new Map<TileKind, LegalOption[]>();
+      for (const [kind, options] of entry.legal) {
+        const still: LegalOption[] = [];
+        for (const o of options) if (this.isLegal(o.placement)) still.push(this.legalOption(o.placement));
+        legal.set(kind, still);
+      }
+      this.edgeCache.set(ek, { mid: entry.mid, legal });
+    }
+  }
+
+  /** Every tile whose centre is within NEAR_RADIUS of `c` (and some a little farther). */
+  private *tilesNear(c: { x: number; y: number }): Generator<TileRecord> {
+    const ix = Math.floor(c.x / NEAR_RADIUS);
+    const iy = Math.floor(c.y / NEAR_RADIUS);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = this.grid.get(cellOf(ix + dx, iy + dy));
+        if (bucket) for (const id of bucket) yield this.records[id]!;
+      }
+    }
   }
 
   /** Takes the most recently added tile off again, undoing exactly what `add` recorded. */
@@ -135,9 +269,20 @@ export class Tiling {
       const ek = edgeKey(k, keys[(i + 1) % keys.length]!);
       const list = this.edgeMap.get(ek)!;
       list.pop();
-      if (list.length === 0) this.edgeMap.delete(ek);
+      if (list.length === 0) {
+        this.edgeMap.delete(ek);
+        this.edgeSeq.delete(ek);
+        this.boundary.delete(ek);
+      } else if (list.length === 1) {
+        this.boundary.set(ek, list[0]!);
+        this.boundaryUnordered = true;
+      }
     });
-    this.candidateCache = new Map();
+    const cell = this.cellKey(rec.center);
+    const bucket = this.grid.get(cell)!;
+    bucket.pop(); // the newest tile is the last one in its cell
+    if (bucket.length === 0) this.grid.delete(cell);
+    this.changedNear(rec, false);
     return rec;
   }
 
@@ -178,9 +323,11 @@ export class Tiling {
     if (!shares) return false;
 
     const center = centerOf(vertices);
+    const box = boxOf(vertices);
     const ownTris = shape.triangles.map((t) => t.map((i) => vertices[i]!));
-    for (const other of this.records) {
+    for (const other of this.tilesNear(center)) {
       if (Math.hypot(other.center.x - center.x, other.center.y - center.y) > NEAR_RADIUS) continue;
+      if (boxesApart(box, other.box)) continue;
       const otherShape = shapeOf(ts, other.placement.kind);
       const otherTris = otherShape.triangles.map((t) => t.map((i) => other.vertices[i]!));
       for (const t1 of ownTris) for (const t2 of otherTris) if (trianglesOverlap(t1, t2)) return false;
@@ -216,9 +363,58 @@ export class Tiling {
     });
   }
 
-  /** Every boundary edge as (tile, edge index). A boundary edge belongs to exactly one tile. */
-  *boundaryEdges(): Generator<EdgeOwner> {
-    for (const owners of this.edgeMap.values()) if (owners.length === 1) yield owners[0]!;
+  /** Every boundary edge as (edge key, tile, edge index). A boundary edge belongs to exactly one tile. */
+  private *boundaryEdges(): Generator<{ ek: string; tileId: number; edge: number }> {
+    if (this.boundaryUnordered) {
+      const seq = (ek: string) => this.edgeSeq.get(ek)!;
+      this.boundary = new Map([...this.boundary].sort(([a], [b]) => seq(a) - seq(b)));
+      this.boundaryUnordered = false;
+    }
+    for (const [ek, owner] of this.boundary) yield { ek, ...owner };
+  }
+
+  /** Is boundary edge `edge` of tile `tileId` inside the growth region? */
+  private edgeInRegion(tileId: number, edge: number): boolean {
+    const vs = this.records[tileId]!.vertices;
+    return this.inRegion(vs[edge]!, vs[(edge + 1) % vs.length]!);
+  }
+
+  /** A placement known to be legal, with the boundary edges it is glued onto (all its edges already in the tiling). */
+  private legalOption(placement: Placement): LegalOption {
+    const keys = placementVertices(this.tileSet, placement).map(pointKey);
+    const glued: string[] = [];
+    keys.forEach((a, i) => {
+      const ek = edgeKey(a, keys[(i + 1) % keys.length]!);
+      if (this.edgeMap.has(ek)) glued.push(ek);
+    });
+    return { placement, glued };
+  }
+
+  /** The (cached) legal placements glued onto boundary edge `edge` of tile `tileId`. */
+  private edgeEntry(ek: string, tileId: number, edge: number): EdgeEntry {
+    const cached = this.edgeCache.get(ek);
+    if (cached) return cached;
+    const ts = this.tileSet;
+    const owner = this.records[tileId]!;
+    const ownerEdge = shapeOf(ts, owner.placement.kind).edges[edge]!;
+    const from = owner.vertices[edge]!;
+    const to = owner.vertices[(edge + 1) % owner.vertices.length]!;
+    const reverseDir = edgeDirection(ts, owner.placement, edge) + 5;
+    const legal = new Map<TileKind, LegalOption[]>();
+    for (const kind of ts.kinds) {
+      const options: LegalOption[] = [];
+      shapeOf(ts, kind).edges.forEach((e, j) => {
+        if (!eq(e.length, ownerEdge.length) || !ts.edgesMatch(e.label, ownerEdge.label)) return;
+        const placement = placementOnSegment(ts, kind, j, to, reverseDir);
+        if (this.isLegal(placement)) options.push(this.legalOption(placement));
+      });
+      legal.set(kind, options);
+    }
+    const a = toXY(from);
+    const b = toXY(to);
+    const entry: EdgeEntry = { mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, legal };
+    this.edgeCache.set(ek, entry);
+    return entry;
   }
 
   /**
@@ -228,53 +424,45 @@ export class Tiling {
    * the growth region are looked at.
    */
   deadEdges(): { from: Point; to: Point }[] {
-    const ts = this.tileSet;
     const out: { from: Point; to: Point }[] = [];
-    for (const { tileId, edge } of this.boundaryEdges()) {
-      const owner = this.records[tileId]!;
-      const ownerEdge = shapeOf(ts, owner.placement.kind).edges[edge]!;
-      const from = owner.vertices[edge]!;
-      const to = owner.vertices[(edge + 1) % owner.vertices.length]!;
-      if (!this.inRegion(from, to)) continue;
-      const reverseDir = edgeDirection(ts, owner.placement, edge) + 5;
-      const fillable = ts.kinds.some((kind) =>
-        shapeOf(ts, kind).edges.some(
-          (e, j) =>
-            eq(e.length, ownerEdge.length) &&
-            ts.edgesMatch(e.label, ownerEdge.label) &&
-            this.isLegal(placementOnSegment(ts, kind, j, to, reverseDir)),
-        ),
-      );
-      if (!fillable) out.push({ from, to });
+    for (const { ek, tileId, edge } of this.boundaryEdges()) {
+      if (!this.edgeInRegion(tileId, edge)) continue;
+      const { legal } = this.edgeEntry(ek, tileId, edge);
+      if ([...legal.values()].some((options) => options.length > 0)) continue;
+      const vs = this.records[tileId]!.vertices;
+      out.push({ from: vs[edge]!, to: vs[(edge + 1) % vs.length]! });
     }
     return out;
   }
 
-  /** All legal placements of `kind` glued onto a boundary edge inside the growth region. */
+  /**
+   * All legal placements of `kind` glued onto a boundary edge inside the
+   * growth region, each once: a placement glued onto several boundary edges
+   * is listed at the first of them (in boundary order) inside the region.
+   */
   candidates(kind: TileKind): readonly Placement[] {
     const cached = this.candidateCache.get(kind);
     if (cached) return cached;
-    const ts = this.tileSet;
-    const shape = shapeOf(ts, kind);
-    const seen = new Set<string>();
     const out: Placement[] = [];
-    for (const { tileId, edge } of this.boundaryEdges()) {
-      const owner = this.records[tileId]!;
-      const ownerEdge = shapeOf(ts, owner.placement.kind).edges[edge]!;
-      const to = owner.vertices[(edge + 1) % owner.vertices.length]!;
-      if (!this.inRegion(owner.vertices[edge]!, to)) continue;
-      const reverseDir = edgeDirection(ts, owner.placement, edge) + 5;
-      shape.edges.forEach((e, j) => {
-        if (!eq(e.length, ownerEdge.length) || !ts.edgesMatch(e.label, ownerEdge.label)) return;
-        const p = placementOnSegment(ts, kind, j, to, reverseDir);
-        const key = placementKey(p);
-        if (seen.has(key)) return;
-        seen.add(key);
-        if (this.isLegal(p)) out.push(p);
-      });
+    for (const { ek, tileId, edge } of this.boundaryEdges()) {
+      if (!this.edgeInRegion(tileId, edge)) continue;
+      for (const o of this.edgeEntry(ek, tileId, edge).legal.get(kind) ?? []) {
+        if (o.glued.length > 1 && !this.listedHere(o, ek)) continue;
+        out.push(o.placement);
+      }
     }
     this.candidateCache.set(kind, out);
     return out;
+  }
+
+  /** Is `ek` the first (in boundary order) of the boundary edges `o` is glued onto that lie inside the region? */
+  private listedHere(o: LegalOption, ek: string): boolean {
+    const seq = this.edgeSeq.get(ek)!;
+    return o.glued.every((g) => {
+      if (g === ek || this.edgeSeq.get(g)! > seq) return true;
+      const owner = this.boundary.get(g)!;
+      return !this.edgeInRegion(owner.tileId, owner.edge);
+    });
   }
 }
 
