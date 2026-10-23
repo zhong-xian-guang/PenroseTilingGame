@@ -3,7 +3,9 @@
  * board, tests) imports from here only. The engine has no DOM, Canvas or
  * Svelte dependency.
  */
-export { createGame } from './game';
+export { createGame, replayRecord } from './game';
+export { encodeRecord, decodeRecord, RecordFormatError, RECORD_VERSION } from './record';
+export type { GameRecord, RecordStep } from './record';
 export type { Game, GameEvent, GameOptions, Pick, PlacedTile, VertexInfo } from './game';
 export type { Placement } from './geometry';
 export { openingPatch, OPENING_MIN_TILES, OPENING_MAX_TILES } from './opening';

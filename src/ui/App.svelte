@@ -3,6 +3,7 @@
   import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE } from '../board/renderer';
+  import { Autosave } from '../storage/autosave';
   import Tray from './Tray.svelte';
   import Menu from './Menu.svelte';
   import { t } from '../i18n/index.svelte';
@@ -10,7 +11,7 @@
   /** A fresh game starting from a random opening patch. */
   const newGame = (): Game => {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
-    return createGame({ tileSet: P2, opening: openingPatch(seed) });
+    return createGame({ tileSet: P2, opening: openingPatch(seed), seed });
   };
 
   // The board holds the game, so a new game re-attaches it (see attach); nothing renders from game directly.
@@ -30,7 +31,12 @@
   recompute();
 
   let canvas: HTMLCanvasElement;
+  let trayZone: HTMLElement;
   let board: Board | null = null;
+  /** A finger holds the pending tile over the tray (lifting it there removes it). */
+  let removing = $state(false);
+  /** Touch-first device: show the finger controls in the hint. */
+  const coarsePointer = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 
   let offGame: (() => void) | null = null;
 
@@ -39,6 +45,9 @@
     offGame?.();
     board?.destroy();
     board = new Board(canvas, game);
+    board.trayElement = trayZone;
+    removing = false;
+    board.onTrayDropTarget = (r) => (removing = r);
     offGame = game.subscribe((e) => {
       recompute();
       if (e.type === 'selection-changed') board?.refresh();
@@ -46,14 +55,34 @@
     recompute();
   };
 
+  // Every step is saved automatically; on load the last game resumes (no manual save/load).
+  let autosave: Autosave | null = null;
+
   const startNewGame = () => {
     game = newGame();
     attach();
+    void autosave?.track(game);
   };
 
   onMount(() => {
     attach();
+    let alive = true;
+    void (async () => {
+      const store = await Autosave.open();
+      if (!alive || !store) return;
+      autosave = store;
+      const resumed = await store.resume().catch(() => null);
+      if (!alive) return;
+      if (resumed) {
+        game = resumed;
+        attach();
+      } else {
+        void store.track(game);
+      }
+    })();
     return () => {
+      alive = false;
+      autosave?.detach();
       offGame?.();
       offGame = null;
       board?.destroy();
@@ -104,20 +133,26 @@
 
   <footer>
     <p class="hint">
-      {#if selected}
+      {#if coarsePointer}
+        {t('hint.touch')}
+      {:else if selected}
         {t('hint.place')}
       {:else}
         {t('hint.pick')}
       {/if}
     </p>
-    <Tray
-      kinds={P2.kinds}
-      {selected}
-      colors={DEFAULT_PALETTE.tiles}
-      {icons}
-      {labels}
-      onselect={(kind) => game.select(kind)}
-    />
+    <div bind:this={trayZone}>
+      <Tray
+        kinds={P2.kinds}
+        {selected}
+        colors={DEFAULT_PALETTE.tiles}
+        {icons}
+        {labels}
+        {removing}
+        onselect={(kind) => game.select(kind)}
+        ondragout={(kind, e) => board?.beginTrayDrag(kind, e)}
+      />
+    </div>
   </footer>
 </main>
 

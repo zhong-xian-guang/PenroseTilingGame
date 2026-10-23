@@ -34,6 +34,12 @@ export interface Scene {
   /** The pointer is over the pending tile (its wheel/right-click target). */
   pendingHovered: boolean;
   preview: Preview | null;
+  /**
+   * A tile held under a finger that is not (or no longer) on the tiling: a
+   * tile dragged out of the tray with no candidate nearby, or the pending
+   * tile being dragged back to the tray. `pts` are world coordinates.
+   */
+  ghost?: { placement: Placement; pts: XY[] } | null;
 }
 
 export function drawBoard(
@@ -82,6 +88,17 @@ export function drawBoard(
     ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
     ctx.fillStyle = palette.outline;
     ctx.fill();
+  }
+
+  if (scene.ghost) {
+    ctx.save();
+    drawTile(ctx, game, camera, palette, scene.ghost.placement, scene.ghost.pts, scene.showArcs, 0.4);
+    tracePolygon(ctx, camera, scene.ghost.pts);
+    ctx.setLineDash([3, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = palette.outline;
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
