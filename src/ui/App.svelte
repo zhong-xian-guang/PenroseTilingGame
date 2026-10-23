@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type GameRecord, type Score, type TileKind } from '../engine';
+  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type Backtrace, type GameRecord, type Score, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE, type Palette } from '../board/renderer';
   import { derivePalette } from '../settings/palette';
   import { displaySettings } from '../settings/store.svelte';
   import { Autosave } from '../storage/autosave';
   import { submitScore, type BestComparison } from '../storage/best';
+  import { backtraceInBackground } from './backtrace';
   import Tray from './Tray.svelte';
   import Menu from './Menu.svelte';
   import GameOverDialog from './GameOverDialog.svelte';
@@ -32,6 +33,8 @@
   /** The analysis page is open (in place of the summary); it shows `analysisRecord`. */
   let analysisOpen = $state(false);
   let analysisRecord = $state.raw<GameRecord | null>(null);
+  /** Mistake backtrace of the finished game (ticket 10): undefined while it runs in the background, null if unavailable. */
+  let backtrace = $state.raw<Backtrace | null | undefined>(undefined);
 
   const recompute = () => {
     selected = game.selectedKind();
@@ -43,6 +46,12 @@
       best = null;
       void submitScore(finished.tileSet.id, finished.score()).then((c) => {
         if (game === finished) best = c;
+      });
+      // the record of a finished game never changes: the summary and the analysis page share it
+      analysisRecord = finished.record();
+      backtrace = undefined;
+      void backtraceInBackground(analysisRecord).then((b) => {
+        if (game === finished) backtrace = b;
       });
     }
   };
@@ -193,15 +202,14 @@
     open={over && !analysisOpen}
     {score}
     {best}
-    ondetails={() => {
-      analysisRecord = game.record();
-      analysisOpen = true;
-    }}
+    doomedAt={backtrace === undefined ? undefined : (backtrace?.doomedAt ?? null)}
+    ondetails={() => (analysisOpen = true)}
     onnewgame={startNewGame}
   />
   <AnalysisPage
     open={analysisOpen}
     record={analysisRecord}
+    {backtrace}
     {palette}
     showArcs={displaySettings.value.showArcs}
     onback={() => (analysisOpen = false)}

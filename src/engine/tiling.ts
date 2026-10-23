@@ -34,7 +34,7 @@ interface VertexRecord {
   readonly corners: CornerAt[];
 }
 
-interface EdgeOwner {
+export interface EdgeOwner {
   readonly tileId: number;
   readonly edge: number;
 }
@@ -228,24 +228,40 @@ export class Tiling {
    * the growth region are looked at.
    */
   deadEdges(): { from: Point; to: Point }[] {
-    const ts = this.tileSet;
     const out: { from: Point; to: Point }[] = [];
-    for (const { tileId, edge } of this.boundaryEdges()) {
-      const owner = this.records[tileId]!;
-      const ownerEdge = shapeOf(ts, owner.placement.kind).edges[edge]!;
-      const from = owner.vertices[edge]!;
-      const to = owner.vertices[(edge + 1) % owner.vertices.length]!;
+    for (const owner of this.boundaryEdges()) {
+      const rec = this.records[owner.tileId]!;
+      const from = rec.vertices[owner.edge]!;
+      const to = rec.vertices[(owner.edge + 1) % rec.vertices.length]!;
       if (!this.inRegion(from, to)) continue;
-      const reverseDir = edgeDirection(ts, owner.placement, edge) + 5;
-      const fillable = ts.kinds.some((kind) =>
-        shapeOf(ts, kind).edges.some(
-          (e, j) =>
-            eq(e.length, ownerEdge.length) &&
-            ts.edgesMatch(e.label, ownerEdge.label) &&
-            this.isLegal(placementOnSegment(ts, kind, j, to, reverseDir)),
-        ),
-      );
-      if (!fillable) out.push({ from, to });
+      if (this.fillers(owner, 1).length === 0) out.push({ from, to });
+    }
+    return out;
+  }
+
+  /**
+   * The legal placements (any kind, any orientation) glued onto boundary edge
+   * `edge` of tile `tileId`, ignoring the growth region; stops after `limit`.
+   */
+  fillers({ tileId, edge }: EdgeOwner, limit = Infinity): Placement[] {
+    const ts = this.tileSet;
+    const owner = this.records[tileId]!;
+    const ownerEdge = shapeOf(ts, owner.placement.kind).edges[edge]!;
+    const to = owner.vertices[(edge + 1) % owner.vertices.length]!;
+    const reverseDir = edgeDirection(ts, owner.placement, edge) + 5;
+    const out: Placement[] = [];
+    const seen = new Set<string>();
+    for (const kind of ts.kinds) {
+      const edges = shapeOf(ts, kind).edges;
+      for (let j = 0; j < edges.length && out.length < limit; j++) {
+        const e = edges[j]!;
+        if (!eq(e.length, ownerEdge.length) || !ts.edgesMatch(e.label, ownerEdge.label)) continue;
+        const p = placementOnSegment(ts, kind, j, to, reverseDir);
+        const key = placementKey(p);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (this.isLegal(p)) out.push(p);
+      }
     }
     return out;
   }

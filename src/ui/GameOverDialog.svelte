@@ -2,8 +2,8 @@
   /**
    * End-of-game summary (tickets 04, 09): area (animated with NumberFlow), tile
    * count, the comparison with the personal best of this tile set, "Details"
-   * (the analysis page) and a new game.
-   * Ticket 10 adds "doomed since step N" here.
+   * (the analysis page) and a new game; ticket 10 adds "doomed by step N at
+   * the latest" from the background mistake backtrace.
    */
   import NumberFlow from '@number-flow/svelte';
   import type { Score } from '../engine';
@@ -14,6 +14,7 @@
     open,
     score,
     best,
+    doomedAt,
     ondetails,
     onnewgame,
   }: {
@@ -21,6 +22,8 @@
     score: Score;
     /** Null while the stored best is still being read (or storage is unavailable). */
     best: BestComparison | null;
+    /** Backtrace result: the step number, undefined while it runs, null when there is none. */
+    doomedAt: number | null | undefined;
     ondetails: () => void;
     onnewgame: () => void;
   } = $props();
@@ -73,6 +76,12 @@
         {t('gameOver.areaUnit')}
       </span>
     </p>
+  {/if}
+
+  {#if doomedAt === undefined}
+    <p class="doomed pending">{t('gameOver.doomedPending')}</p>
+  {:else if doomedAt !== null}
+    <p class="doomed">{t('gameOver.doomedAt', { n: doomedAt })}</p>
   {/if}
 
   <div class="actions">
@@ -139,6 +148,13 @@
     margin-top: 2px;
     font-size: 12px;
     font-weight: 400;
+    color: var(--muted);
+  }
+  .doomed {
+    margin: 0 0 16px;
+    font-size: 14px;
+  }
+  .doomed.pending {
     color: var(--muted);
   }
   .actions {
