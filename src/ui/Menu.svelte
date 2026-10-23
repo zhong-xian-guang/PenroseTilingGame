@@ -1,6 +1,7 @@
 <script lang="ts">
   import { i18n, t } from '../i18n/index.svelte';
   import oflText from '../fonts/OFL.txt?raw';
+  import SettingsDialog from './SettingsDialog.svelte';
 
   let about: HTMLDialogElement;
 </script>
@@ -9,6 +10,7 @@
   <button type="button" aria-label={t('language.switch')} onclick={() => i18n.toggle()}>
     {t('language.other')}
   </button>
+  <SettingsDialog />
   <button type="button" onclick={() => about.showModal()}>{t('about.open')}</button>
 </nav>
 
