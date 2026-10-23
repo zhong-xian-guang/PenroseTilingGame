@@ -24,8 +24,12 @@ export interface Game {
   readonly tileSet: TileSet;
 
   // ---- queries ----
-  /** Every tile on the board, in placement order. */
+  /** Every tile on the board (confirmed tiling, then the pending tile), in placement order. */
   tiles(): readonly PlacedTile[];
+  /** The confirmed tiling: every tile except the pending one. It never changes again. */
+  confirmedTiles(): readonly PlacedTile[];
+  /** The pending tile (the one placed last, still adjustable), or null. */
+  pendingTile(): PlacedTile | null;
   /** Exact corner positions of any placement (placed or not), counter-clockwise. */
   verticesOf(placement: Placement): Point[];
   /** Every candidate placement of `kind`: legal, non-overlapping, sharing a whole edge with the tiling. */
@@ -52,8 +56,27 @@ export interface Game {
   // ---- commands ----
   /** Pick a tile kind from the tray (or clear the pick with null). */
   select(kind: TileKind | null): void;
-  /** Put a tile down. Returns false, changing nothing, unless it is a candidate placement. */
-  place(placement: Placement): boolean;
+  /**
+   * Put a tile down. It becomes the pending tile, and the previous pending
+   * tile (if any) is confirmed. Returns false, changing nothing, unless it is
+   * a candidate placement.
+   *
+   * `position` is the point of the tiling the tile was attached at (as in
+   * `orientationsAt` / `pickNear`); turning the pending tile cycles through
+   * the legal orientations there. When omitted or not a corner of the tile on
+   * the tiling, the first such corner (in corner order) is used.
+   */
+  place(placement: Placement, position?: Point): boolean;
+  /**
+   * Turn the pending tile to the next (`step` = 1) or previous (-1) legal
+   * orientation at its position, counter-clockwise order as in
+   * `orientationsAt`, judged against the confirmed tiling. Returns false,
+   * changing nothing, when there is no pending tile or it has no other
+   * legal orientation.
+   */
+  turnPending(step?: number): boolean;
+  /** Take the pending tile off the board. Returns false, changing nothing, when there is none. */
+  removePending(): boolean;
 
   // ---- events ----
   /** Listen for changes; returns an unsubscribe function. */
@@ -103,6 +126,8 @@ export function createGame(options: GameOptions = {}): Game {
     return { ...rec.placement, id, vertices: rec.vertices };
   };
 
+  /** The pending tile is always the last tile of the tiling; `position` is where it was attached. */
+  let pending: { id: number; position: Point } | null = null;
   let selected: TileKind | null = null;
   const listeners = new Set<(event: GameEvent) => void>();
   const emit = (event: GameEvent) => {
@@ -128,6 +153,8 @@ export function createGame(options: GameOptions = {}): Game {
   return {
     tileSet,
     tiles: () => tiling.tiles.map((t) => toPlaced(t.id)),
+    confirmedTiles: () => tiling.tiles.filter((t) => t.id !== pending?.id).map((t) => toPlaced(t.id)),
+    pendingTile: () => (pending === null ? null : toPlaced(pending.id)),
     verticesOf: (p) => placementVertices(tileSet, p),
     candidates: (kind) => tiling.candidates(kind),
     orientationsAt,
@@ -175,9 +202,33 @@ export function createGame(options: GameOptions = {}): Game {
       emit({ type: 'selection-changed' });
     },
 
-    place(placement) {
+    place(placement, position) {
       if (!tileSet.kinds.includes(placement.kind) || !tiling.isLegal(placement)) return false;
-      tiling.add(placement);
+      const attached = placementVertices(tileSet, placement).filter((v) => tiling.vertex(pointKey(v)));
+      const anchor =
+        (position && attached.find((v) => pointKey(v) === pointKey(position))) ?? attached[0]!;
+      pending = { id: tiling.add(placement).id, position: anchor };
+      emit({ type: 'tiling-changed' });
+      return true;
+    },
+
+    turnPending(step = 1) {
+      if (pending === null) return false;
+      const current = tiling.removeLast()!.placement;
+      const options = orientationsAt(pending.position, current.kind);
+      const i = options.findIndex((o) => placementKey(o) === placementKey(current));
+      const n = options.length;
+      const next = n > 1 && i >= 0 ? options[(((i + step) % n) + n) % n]! : current;
+      pending = { ...pending, id: tiling.add(next).id };
+      if (placementKey(next) === placementKey(current)) return false;
+      emit({ type: 'tiling-changed' });
+      return true;
+    },
+
+    removePending() {
+      if (pending === null) return false;
+      tiling.removeLast();
+      pending = null;
       emit({ type: 'tiling-changed' });
       return true;
     },

@@ -3,6 +3,7 @@
   "board.label": "盤面",
   "hud.tiles": "片數",
   "hud.area": "面積",
+  "game.new": "開新局",
   "zoom.in": "放大",
   "zoom.out": "縮小",
   "zoom.fit": "置中",

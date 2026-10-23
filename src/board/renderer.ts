@@ -11,6 +11,8 @@ export interface Palette {
   outline: string;
   arcA: string;
   arcB: string;
+  /** Outline of the pending tile (the one still adjustable). */
+  pending: string;
 }
 
 export const DEFAULT_PALETTE: Palette = {
@@ -19,6 +21,7 @@ export const DEFAULT_PALETTE: Palette = {
   outline: '#2b3440',
   arcA: '#8a3b2a',
   arcB: '#1f4f7a',
+  pending: '#d1495b',
 };
 
 export interface Preview {
@@ -28,6 +31,8 @@ export interface Preview {
 
 export interface Scene {
   showArcs: boolean;
+  /** The pointer is over the pending tile (its wheel/right-click target). */
+  pendingHovered: boolean;
   preview: Preview | null;
 }
 
@@ -43,8 +48,22 @@ export function drawBoard(
   ctx.fillStyle = palette.background;
   ctx.fillRect(0, 0, camera.width, camera.height);
 
-  for (const tile of game.tiles()) {
+  for (const tile of game.confirmedTiles()) {
     drawTile(ctx, game, camera, palette, tile, tile.vertices.map(toXY), scene.showArcs, 1);
+  }
+
+  const pending = game.pendingTile();
+  if (pending) {
+    // the pending tile: slightly see-through, with a bold accent outline (thicker while hovered)
+    const pts = pending.vertices.map(toXY);
+    drawTile(ctx, game, camera, palette, pending, pts, scene.showArcs, 0.8);
+    ctx.save();
+    tracePolygon(ctx, camera, pts);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(scene.pendingHovered ? 3.5 : 2.5, camera.scale * (scene.pendingHovered ? 0.1 : 0.07));
+    ctx.strokeStyle = palette.pending;
+    ctx.stroke();
+    ctx.restore();
   }
 
   if (scene.preview) {
