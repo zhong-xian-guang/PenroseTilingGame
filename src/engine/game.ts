@@ -224,11 +224,21 @@ export function createGame(options: GameOptions = {}): Game {
  * tile set is unknown or a step is not legal at its point in the game.
  */
 export function replayRecord(record: GameRecord): Game {
+  return replayWith(record, () => {});
+}
+
+/**
+ * Internal (not exported from index.ts): `replayRecord`, calling `visit` with
+ * the game before the first step (index 0) and after each step i (index i + 1).
+ */
+export function replayWith(record: GameRecord, visit: (game: Game, index: number) => void): Game {
   const tileSet = TILE_SETS[record.tileSet];
   if (!tileSet) throw new Error(`Unknown tile set "${record.tileSet}" in record`);
   const { game, apply } = build({ tileSet, opening: record.opening, seed: record.seed });
+  visit(game, 0);
   record.steps.forEach((step, i) => {
     if (!apply(step)) throw new Error(`Record step ${i} (${step.type}) is not legal here`);
+    visit(game, i + 1);
   });
   return game;
 }

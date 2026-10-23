@@ -19,9 +19,15 @@ import { zphi } from './zphi';
 
 export const RECORD_VERSION = 1;
 
+/** How a tile was placed: picked by the player (free) or snapped to the recommended spot (flow, ticket 08). */
+export type PlayMode = 'free' | 'flow';
+
 export type RecordStep =
-  /** A tile put down at `position` (the tiling point it was attached at); it becomes the pending tile. */
-  | { readonly type: 'place'; readonly placement: Placement; readonly position: Point }
+  /**
+   * A tile put down at `position` (the tiling point it was attached at); it becomes the pending tile.
+   * `mode` is missing until ticket 08 records it; missing means 'free'.
+   */
+  | { readonly type: 'place'; readonly placement: Placement; readonly position: Point; readonly mode?: PlayMode }
   /** The pending tile turned to `placement`. */
   | { readonly type: 'turn'; readonly placement: Placement }
   /** The pending tile taken off the board. */

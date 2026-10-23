@@ -85,7 +85,7 @@ export class TileLayer {
    * should redraw after REBUILD_DELAY (the zoom is off the cache's scale, so
    * the cache wants rebuilding once it settles).
    */
-  sync(game: Game, camera: Camera, dpr: number, painter: TilePainter, style: unknown, now: number) {
+  sync(game: Pick<Game, 'confirmedTiles'>, camera: Camera, dpr: number, painter: TilePainter, style: unknown, now: number) {
     if (style !== this.style || dpr !== this.dpr) {
       this.style = style;
       this.dpr = dpr;

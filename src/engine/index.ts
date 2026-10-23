@@ -4,8 +4,10 @@
  * Svelte dependency.
  */
 export { createGame, replayRecord } from './game';
+export { analyzeRecord, replayFrames } from './analysis';
+export type { GameStats, ReplayFrame } from './analysis';
 export { encodeRecord, decodeRecord, RecordFormatError, RECORD_VERSION } from './record';
-export type { GameRecord, RecordStep } from './record';
+export type { GameRecord, PlayMode, RecordStep } from './record';
 export type {
   DeadEnd,
   Game,
