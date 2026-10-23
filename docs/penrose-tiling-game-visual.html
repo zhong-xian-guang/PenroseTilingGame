@@ -1,0 +1,984 @@
+<!doctype html>
+<!--
+  grill-with-ui visual · v1 (first cut) · kind: prototype · New UI (wireframe fidelity, neutral chrome)
+  Topic: Penrose Tiling Game 核心玩法與 MVP
+
+  Reflects (all 19 answered, nothing assumed):
+   Q1 A  犯錯 = 走進死局，遊戲結束          Q2 B  MVP 只做 P2（kite / dart）
+   Q3 A  TypeScript + Canvas 2D（這裡用 canvas 繪製盤面）
+   Q4 E  可見死局：凹處連一片都放不進去才判輸（紅色標示）
+   Q5 A  死局即結束，不能悔棋               Q6 B  分數 = 面積，單位為「最短邊²」
+   Q7    開局隨機抽一個預設圖形，不必對稱   Q18 A 執行時從細分參考鋪砌切 3–6 片
+   Q8 A  顏色依拼塊種類（kite 色 / dart 色）+ 預設組合
+   Q9 B  成長圓：R = √(面積/π) + 餘量，只能在圓內放
+   Q10 C 匹配標記（Conway 弧線）可開關，預設顯示，顏色自動推導
+   Q11 D 先挑拼塊；最新一片是「預放」：滾輪 / 點擊換合法方向，右鍵 / 拖回托盤移除；沒有確認按鈕
+   Q12 D 心流模式：上一片附近最受限的凹處，推薦點沿邊界連續前進
+   Q13 A+B+C 結算窗（面積、片數、個人最佳、最遲第 N 步）→「詳細」分析頁（比例 vs φ、形狀完整度、錯誤回溯重播）
+   Q14 A 預放造成死局：凹洞立刻標紅、不結束；直接放下一片 = 確認 → 結束
+   Q15 A 分數不分模式，只在棋譜記錄模式（分析頁顯示比例）
+   Q16 B 分享棋譜連結（無線上排行榜）     Q17 A 每一步自動保存（頂列指示）
+   Q19 B 繁體中文 + 英文（設定可切換）；字型 LINE Seed
+
+  Font: the app will ship LINE Seed (subset, precached). This offline prototype only names the locally
+  installed LINE Seed families and falls back to the system CJK sans (PingFang TC / Microsoft JhengHei / Noto Sans TC).
+
+  Geometry: short edge = 1, long edge = φ. Kite 72/72/72/144, dart 72/36/216/36 (tip, side, tail/reflex, side).
+  Rule engine is real: reference tiling by Robinson-triangle deflation; legality = no overlap + matching edge arrows;
+  dead-end = concave boundary vertex (gap < 180°) where no tile fits. "最遲在第 N 步" uses a placeholder heuristic
+  (the real app runs forced-tile propagation offline).
+  The dashed strip at the very top is prototype-only controls, not game UI.
+-->
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Penrose 鋪砌 · 原型</title>
+<style>
+:root{
+  --font:"LINE Seed TW","LINE Seed TW_OTF","LINE Seed Sans TW","LINE Seed Sans","LINE Seed JP",
+         "PingFang TC","Microsoft JhengHei","Noto Sans TC","Noto Sans CJK TC",system-ui,sans-serif;
+  --bg:#f3f3f1; --panel:#ffffff; --ink:#1f2328; --muted:#6b7280; --line:#e2e2de; --line2:#cfcfca;
+  --accent:#2f6fde; --accent-soft:#e7efff; --danger:#d93636; --danger-soft:#fde8e8; --ok:#16a34a;
+  --radius:12px;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:var(--font);color:var(--ink);background:#dcdcd8;display:flex;flex-direction:column;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit}
+/* prototype strip */
+#proto{flex:none;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 12px;border-bottom:1px dashed #9a9a94;background:repeating-linear-gradient(135deg,#ecece8 0 10px,#e6e6e1 10px 20px);font-size:12px;color:#55554f}
+#proto b{font-weight:600;margin-right:4px}
+#proto button{border:1px dashed #8d8d86;background:#fafaf8;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer}
+#proto button:hover{background:#fff}
+/* app frame */
+#app{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);position:relative;overflow:hidden;max-width:900px;width:100%;margin:0 auto;box-shadow:0 0 0 1px var(--line2)}
+header{flex:none;display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font-weight:700;letter-spacing:.02em;font-size:15px;white-space:nowrap}
+.stats{display:flex;gap:14px;font-size:12px;color:var(--muted);flex:1;min-width:0;overflow:hidden}
+.stat b{display:block;color:var(--ink);font-size:16px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat small{font-size:11px}
+.saved{font-size:11px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:4px}
+.saved i{width:6px;height:6px;border-radius:50%;background:var(--ok);display:inline-block;opacity:.25;transition:opacity .3s}
+.saved.on i{opacity:1}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:999px;padding:2px;background:#f6f6f4}
+.seg button{border:0;background:transparent;padding:4px 12px;border-radius:999px;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--ink);color:#fff}
+.iconbtn{border:1px solid var(--line2);background:var(--panel);border-radius:10px;width:34px;height:34px;display:grid;place-items:center;cursor:pointer;flex:none}
+.iconbtn svg{width:18px;height:18px}
+/* board */
+#boardWrap{flex:1;min-height:0;position:relative;overflow:hidden}
+#board{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block;cursor:default}
+.zoom{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px}
+.zoom button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line2);background:rgba(255,255,255,.92);cursor:pointer;font-size:16px;line-height:1}
+.legend{position:absolute;left:10px;top:10px;font-size:11px;color:var(--muted);background:rgba(255,255,255,.85);border:1px solid var(--line);border-radius:8px;padding:5px 8px;line-height:1.6;pointer-events:none}
+.legend span{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:-1px;margin-right:4px}
+.flowtag{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;background:var(--accent);color:#fff;border-radius:999px;padding:3px 10px;display:none}
+.deadtag{position:absolute;left:50%;bottom:42px;transform:translateX(-50%);font-size:12px;background:var(--danger);color:#fff;border-radius:10px;padding:6px 12px;display:none;max-width:92%;text-align:center;line-height:1.4}
+/* tray */
+#tray{flex:none;background:var(--panel);border-top:1px solid var(--line);padding:6px 12px calc(10px + env(safe-area-inset-bottom))}
+#hint{font-size:12px;color:var(--muted);text-align:center;min-height:18px;margin-bottom:6px;line-height:1.5}
+#hint b{color:var(--ink);font-weight:600}
+.pieces{display:flex;justify-content:center;gap:14px}
+.piece{width:112px;border:1.5px solid var(--line2);background:#fafaf9;border-radius:14px;padding:6px 6px 4px;cursor:grab;display:flex;flex-direction:column;align-items:center;touch-action:none;user-select:none;-webkit-user-select:none;transition:border-color .15s, box-shadow .15s}
+.piece svg{width:78px;height:48px;pointer-events:none}
+.piece .nm{font-size:13px;font-weight:600}
+.piece .sub{font-size:11px;color:var(--muted)}
+.piece.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+#tray.drop .pieces{outline:2px dashed var(--danger);outline-offset:4px;border-radius:14px}
+#tray.drop #hint{color:var(--danger)}
+/* overlays */
+.scrim{position:absolute;inset:0;background:rgba(20,22,26,.38);display:none;align-items:center;justify-content:center;padding:16px;z-index:20}
+.scrim.show{display:flex}
+.modal{background:var(--panel);border-radius:16px;width:min(380px,100%);padding:18px 18px 14px;box-shadow:0 18px 50px rgba(0,0,0,.25)}
+.modal h2{margin:0 0 2px;font-size:18px}
+.modal .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+.big{font-size:40px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.big small{font-size:14px;font-weight:600;color:var(--muted);margin-left:4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}
+.cell{border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.cell .k{font-size:11px;color:var(--muted)}
+.cell .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
+.cell .v small{font-size:11px;font-weight:500;color:var(--muted)}
+.doom{background:var(--danger-soft);color:#8f1d1d;border-radius:10px;padding:8px 10px;font-size:14px;font-weight:600}
+.row{display:flex;gap:8px;margin-top:14px}
+.btn{flex:1;border:1px solid var(--line2);background:var(--panel);border-radius:10px;padding:9px 10px;cursor:pointer;font-size:14px}
+.btn.pri{background:var(--ink);border-color:var(--ink);color:#fff}
+.newbest{color:var(--ok);font-weight:700}
+/* analysis page */
+#analysis{position:absolute;inset:0;background:var(--bg);z-index:30;display:none;flex-direction:column}
+#analysis.show{display:flex}
+#analysis header{gap:8px}
+#analysis .body{flex:1;overflow:auto;padding:12px;display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));align-content:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.card h3{margin:0 0 8px;font-size:14px}
+.card .note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
+.kv{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.kv:last-child{border-bottom:0}
+.kv b{font-variant-numeric:tabular-nums}
+.bar{position:relative;height:12px;border-radius:6px;background:#efefec;margin:18px 0 22px}
+.bar .fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:var(--ink)}
+.bar .mk{position:absolute;top:-6px;bottom:-6px;width:2px;background:var(--accent)}
+.bar .mk span{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--accent);white-space:nowrap}
+.bar .lab{position:absolute;top:16px;font-size:11px;color:var(--muted);white-space:nowrap}
+.card canvas{width:100%;height:200px;display:block;background:#fafaf9;border-radius:8px;border:1px solid var(--line)}
+.replayctl{display:flex;gap:6px;align-items:center;margin-top:8px}
+.replayctl input{flex:1}
+.replayctl button{border:1px solid var(--line2);background:var(--panel);border-radius:8px;padding:4px 8px;cursor:pointer;font-size:12px;white-space:nowrap}
+.wide{grid-column:1/-1}
+/* settings sheet */
+#settings{position:absolute;top:0;right:0;bottom:0;width:min(330px,100%);background:var(--panel);border-left:1px solid var(--line);z-index:25;transform:translateX(105%);transition:transform .2s;display:flex;flex-direction:column;box-shadow:-10px 0 30px rgba(0,0,0,.08)}
+#settings.show{transform:none}
+#settings .head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:700}
+#settings .sbody{padding:12px 14px;overflow:auto;display:flex;flex-direction:column;gap:18px}
+.sgroup h4{margin:0 0 8px;font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.switch{display:flex;align-items:center;justify-content:space-between;font-size:14px;gap:10px}
+.switch small{display:block;color:var(--muted);font-size:11px}
+.tg{width:42px;height:24px;border-radius:12px;background:#cfcfca;position:relative;border:0;cursor:pointer;flex:none}
+.tg::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s}
+.tg.on{background:var(--accent)}
+.tg.on::after{left:21px}
+.colorrow{display:flex;align-items:center;justify-content:space-between;font-size:14px;padding:4px 0}
+.colorrow input{width:44px;height:30px;border:1px solid var(--line2);border-radius:8px;padding:2px;background:#fff;cursor:pointer}
+.presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
+.preset{border:1.5px solid var(--line2);border-radius:10px;padding:6px;cursor:pointer;background:#fff;font-size:12px;text-align:center}
+.preset.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.preset svg{width:100%;height:30px;display:block;margin-bottom:2px}
+.toast{position:absolute;left:50%;top:56px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:7px 12px;border-radius:10px;font-size:13px;z-index:40;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center}
+.toast.show{opacity:1}
+@media (max-width:520px){
+  header{gap:8px;padding:8px 10px}.stats{gap:10px}.stat b{font-size:15px}.stat b small{display:none}.brand{display:none}.saved span{display:none}
+  .piece{width:96px}.seg button{padding:4px 9px}
+  #proto{font-size:11px}#proto button{font-size:11px;padding:2px 6px}
+}
+</style>
+</head>
+<body>
+<div id="proto"><b>原型控制（非遊戲介面）</b>
+  <button id="pNew">新開局（隨機開局圖形）</button>
+  <button id="pAuto">自動亂放 → 直到出現死局</button>
+  <button id="pEnd">直接結算</button>
+</div>
+
+<div id="app">
+  <header>
+    <div class="brand">Penrose</div>
+    <div class="stats">
+      <div class="stat"><small data-i="area">面積</small><b id="sArea">0</b></div>
+      <div class="stat"><small data-i="tiles">片數</small><b id="sTiles">0</b></div>
+      <div class="stat"><small data-i="best">個人最佳</small><b id="sBest">0</b></div>
+    </div>
+    <div class="saved" id="saved"><i></i><span data-i="saved">已自動儲存</span></div>
+    <div class="seg" id="modeSeg"><button data-m="free" class="on" data-i="free">自由</button><button data-m="flow" data-i="flow">心流</button></div>
+    <button class="iconbtn" id="openSettings" aria-label="設定"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </header>
+
+  <div id="boardWrap">
+    <canvas id="board"></canvas>
+    <div class="legend" id="legend"></div>
+    <div class="flowtag" id="flowtag" data-i="flowTag">心流模式 · 推薦位置</div>
+    <div class="deadtag" id="deadtag"></div>
+    <div class="zoom"><button id="zIn">+</button><button id="zOut">−</button><button id="zFit" title="置中">◎</button></div>
+  </div>
+
+  <div id="tray">
+    <div id="hint"></div>
+    <div class="pieces">
+      <div class="piece" data-t="K"><svg viewBox="-0.2 -1.15 2.1 2.3"></svg><div class="nm">kite</div><div class="sub" data-i="kiteSub">風箏 · 1.539</div></div>
+      <div class="piece" data-t="D"><svg viewBox="-0.2 -1.15 2.1 2.3"></svg><div class="nm">dart</div><div class="sub" data-i="dartSub">飛鏢 · 0.951</div></div>
+    </div>
+  </div>
+
+  <!-- summary popup -->
+  <div class="scrim" id="summary">
+    <div class="modal">
+      <h2 data-i="overTitle">死局 · 遊戲結束</h2>
+      <div class="sub" id="overSub"></div>
+      <div class="k" style="font-size:12px;color:var(--muted)" data-i="areaScore">面積分數</div>
+      <div class="big" id="mArea">0<small></small></div>
+      <div class="grid2">
+        <div class="cell"><div class="k" data-i="tiles">片數</div><div class="v" id="mTiles"></div></div>
+        <div class="cell"><div class="k" data-i="best">個人最佳</div><div class="v" id="mBest"></div></div>
+      </div>
+      <div class="doom" id="mDoom"></div>
+      <div class="row">
+        <button class="btn" id="bShare" data-i="share">分享棋譜</button>
+        <button class="btn" id="bDetail" data-i="detail">詳細</button>
+        <button class="btn pri" id="bAgain" data-i="again">再來一局</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- analysis page -->
+  <div id="analysis">
+    <header><button class="iconbtn" id="aBack" aria-label="返回">←</button><div class="brand" style="display:block" data-i="analysis">本局分析</div></header>
+    <div class="body">
+      <div class="card"><h3 data-i="aUsage">使用統計</h3><div id="aUsage"></div>
+        <div class="bar" id="ratioBar"><div class="fill"></div><div class="mk"><span>φ ≈ 1.618</span></div><div class="lab" style="left:0">0</div><div class="lab" style="right:0">3.0</div></div>
+        <div class="note" data-i="ratioNote">kite : dart 比例，與無限鋪砌的理想值 φ 比較。</div></div>
+      <div class="card"><h3 data-i="aShape">形狀完整度</h3><canvas id="shapeCv"></canvas><div id="aShape" style="margin-top:8px"></div>
+        <div class="note" data-i="shapeNote">實線圓 = 完整半徑（圓內全部鋪滿）；虛線圓 = 同面積的圓。</div></div>
+      <div class="card wide"><h3 data-i="aReplay">錯誤回溯</h3><canvas id="replayCv" style="height:260px"></canvas>
+        <div class="replayctl"><button id="rPlay">▶</button><input type="range" id="rSlider" min="0" max="1" value="1"><button id="rDoom"></button><span id="rLabel" style="font-size:12px;color:var(--muted);min-width:64px;text-align:right"></span></div>
+        <div class="note" data-i="replayNote">橘框 = 最遲在這一步就已註定；紅色 = 最後的死局位置。（離線以強制拼塊傳播計算，這裡為示意。）</div></div>
+    </div>
+  </div>
+
+  <!-- settings -->
+  <div id="settings">
+    <div class="head"><span data-i="settings">設定</span><button class="iconbtn" id="closeSettings" aria-label="關閉">✕</button></div>
+    <div class="sbody">
+      <div class="sgroup"><h4 data-i="sMarks">匹配標記</h4>
+        <div class="switch"><div><span data-i="showArcs">顯示 Conway 弧線</span><small data-i="arcsSub">關掉可當作困難模式；顏色自動推導</small></div><button class="tg on" id="tgArcs"></button></div></div>
+      <div class="sgroup"><h4 data-i="sColors">拼塊顏色（依種類）</h4>
+        <div class="colorrow"><span>kite</span><input type="color" id="cK"></div>
+        <div class="colorrow"><span>dart</span><input type="color" id="cD"></div></div>
+      <div class="sgroup"><h4 data-i="sPresets">預設組合</h4><div class="presets" id="presets"></div></div>
+      <div class="sgroup"><h4 data-i="sLang">語言</h4><div class="seg" id="langSeg"><button data-l="zh" class="on">繁體中文</button><button data-l="en">English</button></div></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ===== rule engine (pure, no DOM) ===== */
+const PHI = (1 + Math.sqrt(5)) / 2, D2R = Math.PI / 180;
+const C36 = Math.cos(36 * D2R), S36 = Math.sin(36 * D2R);
+// Templates, CCW, index 0 tip, 1 side, 2 tail (kite) / reflex (dart), 3 side. Short edge = 1, long edge = PHI.
+const TPL = {
+  K: [[0, 0], [PHI * C36, -PHI * S36], [PHI, 0], [PHI * C36, PHI * S36]],
+  D: [[0, 0], [PHI * C36, -PHI * S36], [1, 0], [PHI * C36, PHI * S36]]
+};
+const ANG = { K: [72, 72, 144, 72], D: [72, 36, 216, 36] };
+const ELEN = [PHI, 1, 1, PHI];
+// Matching rule (edge arrows, derived from a deflated reference tiling): every edge points at its 'X' vertex;
+// X = kite tip, kite tail, dart sides (the other vertices are 'Y'). Glued edges must match length and arrow.
+const HEADSTART = { K: [1, 0, 1, 0], D: [0, 1, 0, 1] };
+const AREA = { K: PHI * PHI * S36, D: Math.sin(108 * D2R) };
+// Conway arcs: long-edge arcs cross 1 from the X end, short-edge arcs 1/PHI from the X end.
+const ARC = { K: [1, 0, 1 / PHI, 0], D: [1 / PHI, 0, 1 / (PHI * PHI), 0] }; // radius per vertex (0 = none)
+const EPS = 1e-6;
+
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const cent = V => ({ x: (V[0].x + V[1].x + V[2].x + V[3].x) / 4, y: (V[0].y + V[1].y + V[2].y + V[3].y) / 4 });
+const trisOf = V => [[V[0], V[1], V[2]], [V[0], V[2], V[3]]];
+function signedArea(V) { let s = 0; for (let i = 0; i < V.length; i++) { const a = V[i], b = V[(i + 1) % V.length]; s += a.x * b.y - b.x * a.y; } return s / 2; }
+
+function triOverlap(A, B) {
+  for (const T of [A, B]) for (let i = 0; i < 3; i++) {
+    const a = T[i], b = T[(i + 1) % 3]; const nx = a.y - b.y, ny = b.x - a.x; const L = Math.hypot(nx, ny);
+    let mi1 = Infinity, ma1 = -Infinity, mi2 = Infinity, ma2 = -Infinity;
+    for (const p of A) { const d = (p.x * nx + p.y * ny) / L; mi1 = Math.min(mi1, d); ma1 = Math.max(ma1, d); }
+    for (const p of B) { const d = (p.x * nx + p.y * ny) / L; mi2 = Math.min(mi2, d); ma2 = Math.max(ma2, d); }
+    if (ma1 <= mi2 + 1e-5 || ma2 <= mi1 + 1e-5) return false;
+  }
+  return true;
+}
+function onSegInterior(p, a, b) {
+  const L = dist(a, b); if (dist(p, a) < 1e-5 || dist(p, b) < 1e-5) return false;
+  const t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / (L * L);
+  if (t <= 0 || t >= 1) return false;
+  const q = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) }; return dist(p, q) < 1e-5;
+}
+function pointInTri(p, T) {
+  const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const d1 = s(T[0], T[1], p), d2 = s(T[1], T[2], p), d3 = s(T[2], T[0], p);
+  return (d1 >= -1e-9 && d2 >= -1e-9 && d3 >= -1e-9) || (d1 <= 1e-9 && d2 <= 1e-9 && d3 <= 1e-9);
+}
+const pointInTile = (p, V) => trisOf(V).some(T => pointInTri(p, T));
+
+/* Index over a list of tiles: snapped vertex keys, edges, angle sums, boundary. */
+function buildIndex(tiles) {
+  const verts = new Map(), grid = new Map(), vsum = new Map(), edges = new Map(), vb = new Map();
+  const gk = (x, y) => Math.floor(x * 4) + ',' + Math.floor(y * 4);
+  function find(p) {
+    const gx = Math.floor(p.x * 4), gy = Math.floor(p.y * 4);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const L = grid.get((gx + dx) + ',' + (gy + dy)); if (!L) continue;
+      for (const k of L) { const q = verts.get(k); if (Math.abs(q.x - p.x) < 1e-5 && Math.abs(q.y - p.y) < 1e-5) return k; }
+    }
+    return null;
+  }
+  function add(p) {
+    let k = find(p); if (k) return k;
+    k = 'v' + verts.size; verts.set(k, { x: p.x, y: p.y });
+    const g = gk(p.x, p.y); (grid.get(g) || grid.set(g, []).get(g)).push(k); return k;
+  }
+  const tk = [];
+  tiles.forEach((t, ti) => {
+    const ks = t.V.map(add); tk.push(ks);
+    ks.forEach((k, i) => vsum.set(k, (vsum.get(k) || 0) + ANG[t.type][i]));
+    for (let i = 0; i < 4; i++) {
+      const a = ks[i], b = ks[(i + 1) % 4]; const key = a < b ? a + '|' + b : b + '|' + a;
+      const head = HEADSTART[t.type][i] ? a : b;
+      (edges.get(key) || edges.set(key, []).get(key)).push({ ti, i, a, b, head, len: ELEN[i] });
+    }
+  });
+  const boundary = [];
+  for (const L of edges.values()) if (L.length === 1) {
+    const e = L[0]; const be = { ...e, p: verts.get(e.a), q: verts.get(e.b), headPt: verts.get(e.head) };
+    boundary.push(be);
+    for (const k of [e.a, e.b]) (vb.get(k) || vb.set(k, []).get(k)).push(be);
+  }
+  let area = 0, cx = 0, cy = 0;
+  tiles.forEach(t => { const c = cent(t.V), A = AREA[t.type]; area += A; cx += c.x * A; cy += c.y * A; });
+  const centroid = area ? { x: cx / area, y: cy / area } : { x: 0, y: 0 };
+  const cents = tiles.map(t => cent(t.V));
+  return { tiles, tk, verts, find, vsum, edges, boundary, vb, area, centroid, cents };
+}
+
+const MARGIN = 1.5;
+const growthCircle = I => ({ c: I.centroid, R: Math.sqrt(I.area / Math.PI) + MARGIN });
+
+function placeOnEdge(type, j, be) {
+  if (Math.abs(ELEN[j] - be.len) > EPS) return null;
+  const A = TPL[type][j], B = TPL[type][(j + 1) % 4], p = be.p, q = be.q;
+  const th = Math.atan2(p.y - q.y, p.x - q.x) - Math.atan2(B[1] - A[1], B[0] - A[0]);
+  const c = Math.cos(th), s = Math.sin(th);
+  const V = TPL[type].map(([x, y]) => ({ x: q.x + c * (x - A[0]) - s * (y - A[1]), y: q.y + s * (x - A[0]) + c * (y - A[1]) }));
+  V[j] = { x: q.x, y: q.y }; V[(j + 1) % 4] = { x: p.x, y: p.y };
+  const head = HEADSTART[type][j] ? V[j] : V[(j + 1) % 4];
+  if (dist(head, be.headPt) > 1e-5) return null;
+  return V;
+}
+
+function validate(type, V, I, circle) {
+  const c = cent(V);
+  if (circle && dist(c, circle.c) > circle.R) return false;
+  const tris = trisOf(V);
+  const near = [];
+  for (let ti = 0; ti < I.tiles.length; ti++) if (dist(I.cents[ti], c) < 3.4) near.push(ti);
+  for (const ti of near) { const T2 = trisOf(I.tiles[ti].V); for (const a of tris) for (const b of T2) if (triOverlap(a, b)) return false; }
+  const ks = V.map(p => I.find(p));
+  for (let i = 0; i < 4; i++) if (ks[i] && I.vsum.get(ks[i]) + ANG[type][i] > 360 + 1e-6) return false;
+  for (let i = 0; i < 4; i++) {
+    const a = ks[i], b = ks[(i + 1) % 4]; if (!a || !b) continue;
+    const L = I.edges.get(a < b ? a + '|' + b : b + '|' + a); if (!L) continue;
+    if (L.length >= 2) return false;
+    const nh = HEADSTART[type][i] ? a : b; if (L[0].head !== nh || Math.abs(L[0].len - ELEN[i]) > EPS) return false;
+  }
+  for (const ti of near) {
+    const W = I.tiles[ti].V;
+    for (let i = 0; i < 4; i++) for (let k = 0; k < 4; k++) {
+      if (onSegInterior(W[k], V[i], V[(i + 1) % 4])) return false;
+      if (onSegInterior(V[k], W[i], W[(i + 1) % 4])) return false;
+    }
+  }
+  return true;
+}
+
+function vkeyOf(I, p) { return I.find(p) || (Math.round(p.x * 1e4) + ',' + Math.round(p.y * 1e4)); }
+function candidatesOn(I, edgesList, types, circle) {
+  const out = [], seen = new Set();
+  for (const be of edgesList) for (const type of types) for (let j = 0; j < 4; j++) {
+    const V = placeOnEdge(type, j, be); if (!V) continue;
+    const key = type + V.map(p => vkeyOf(I, p)).sort().join(';'); if (seen.has(key)) continue; seen.add(key);
+    if (!validate(type, V, I, circle)) continue;
+    out.push({ type, V, c: cent(V), keys: V.map(p => I.find(p)) });
+  }
+  return out;
+}
+const allCandidates = (I, types, circle) => candidatesOn(I, I.boundary, types, circle);
+
+function boundaryVertexInfo(I, k) {
+  const gap = 360 - I.vsum.get(k); const L = I.vb.get(k) || [];
+  const inc = L.find(e => e.b === k); // tile edge a->k : tiling on its left
+  return { k, pt: I.verts.get(k), gap, edges: L, from: inc ? I.verts.get(inc.a) : null };
+}
+// Visible dead-ends: a concave boundary spot (gap < 180) where no tile at all fits (circle ignored).
+function deadSpots(I) {
+  const out = [];
+  for (const k of I.vb.keys()) {
+    const info = boundaryVertexInfo(I, k);
+    if (info.gap >= 180 - 1e-6) continue;
+    if (candidatesOn(I, info.edges, ['K', 'D'], null).length === 0) out.push(info);
+  }
+  return out;
+}
+// Flow mode: most constrained concave spot near the last tile, else the nearest one.
+function recommendSpot(I, circle, near) {
+  const spots = [];
+  for (const k of I.vb.keys()) {
+    const info = boundaryVertexInfo(I, k); if (info.gap >= 180 - 1e-6) continue;
+    const n = candidatesOn(I, info.edges, ['K', 'D'], circle).filter(c => c.keys.includes(k)).length;
+    if (n > 0) spots.push({ ...info, n, d: dist(info.pt, near) });
+  }
+  if (!spots.length) return null;
+  const close = spots.filter(s => s.d <= 2.2);
+  const pool = close.length ? close : spots;
+  pool.sort((a, b) => close.length ? (a.n - b.n) || (a.d - b.d) : (a.d - b.d));
+  return pool[0];
+}
+
+/* Reference P2 tiling by Robinson-triangle deflation from a sun. */
+function referenceTiling(n) {
+  const P = (x, y) => ({ x, y }), lerp = (a, b, t) => P(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+  let tr = [];
+  for (let i = 0; i < 5; i++) {
+    const th = i * 72 * D2R, C = P(PHI * Math.cos(th), PHI * Math.sin(th));
+    for (const s of [-1, 1]) { const a = th + s * 36 * D2R; tr.push({ k: 'K', T: P(0, 0), S: P(PHI * Math.cos(a), PHI * Math.sin(a)), C }); }
+  }
+  for (let it = 0; it < n; it++) {
+    const o = [];
+    for (const t of tr) {
+      if (t.k === 'K') {
+        const SC = dist(t.S, t.C); const Pp = lerp(t.C, t.T, (SC / PHI) / dist(t.C, t.T)); const Q = lerp(t.S, t.T, SC / dist(t.S, t.T));
+        o.push({ k: 'K', T: t.S, S: Q, C: Pp }, { k: 'K', T: t.S, S: t.C, C: Pp }, { k: 'D', T: t.T, R: Q, S: Pp });
+      } else {
+        const SR = dist(t.S, t.R); const Q = lerp(t.T, t.S, SR / dist(t.S, t.T));
+        o.push({ k: 'K', T: t.T, S: Q, C: t.R }, { k: 'D', T: t.S, R: Q, S: t.R });
+      }
+    }
+    tr = o;
+  }
+  const sc = Math.pow(PHI, n), key = p => Math.round(p.x * 1e4) + ',' + Math.round(p.y * 1e4);
+  const m = new Map();
+  for (const t of tr) { const kk = t.k + key(t.T) + '|' + key(t.k === 'K' ? t.C : t.R); (m.get(kk) || m.set(kk, []).get(kk)).push(t); }
+  const S = p => ({ x: p.x * sc, y: p.y * sc }), tiles = [];
+  for (const v of m.values()) {
+    if (v.length !== 2) continue; const [a, b] = v;
+    let V = [S(a.T), S(a.S), S(a.k === 'K' ? a.C : a.R), S(b.S)];
+    if (signedArea(V) < 0) V = [V[0], V[3], V[2], V[1]];
+    tiles.push({ type: a.k, V });
+  }
+  return tiles;
+}
+
+function openingPatch(rand) {
+  const ref = referenceTiling(6); const I = buildIndex(ref);
+  const interior = ref.map((t, i) => i).filter(i => I.tk[i].every(k => Math.abs(I.vsum.get(k) - 360) < 1e-6) && Math.hypot(I.cents[i].x, I.cents[i].y) < 12);
+  const start = interior[Math.floor(rand() * interior.length)];
+  const want = 3 + Math.floor(rand() * 4), pick = new Set([start]);
+  while (pick.size < want) {
+    const fr = [];
+    for (const ti of pick) for (let i = 0; i < 4; i++) {
+      const a = I.tk[ti][i], b = I.tk[ti][(i + 1) % 4]; const L = I.edges.get(a < b ? a + '|' + b : b + '|' + a);
+      for (const e of L) if (!pick.has(e.ti)) fr.push(e.ti);
+    }
+    if (!fr.length) break; pick.add(fr[Math.floor(rand() * fr.length)]);
+  }
+  const chosen = [...pick].map(i => ref[i]);
+  let A = 0, cx = 0, cy = 0; chosen.forEach(t => { const c = cent(t.V); A += AREA[t.type]; cx += c.x * AREA[t.type]; cy += c.y * AREA[t.type]; });
+  cx /= A; cy /= A; const rot = Math.floor(rand() * 10) * 36 * D2R, c = Math.cos(rot), s = Math.sin(rot);
+  return chosen.map(t => ({ type: t.type, V: t.V.map(p => ({ x: c * (p.x - cx) - s * (p.y - cy), y: s * (p.x - cx) + c * (p.y - cy) })) }));
+}
+/* ===== end engine ===== */
+
+
+/* ===== i18n (Q19 B) ===== */
+const STR = {
+  zh: { area:'面積', tiles:'片數', best:'個人最佳', saved:'已自動儲存', free:'自由', flow:'心流', flowTag:'心流模式 · 推薦位置',
+    kiteSub:'風箏 · 1.539', dartSub:'飛鏢 · 0.951', overTitle:'死局 · 遊戲結束', areaScore:'面積分數', share:'分享棋譜', detail:'詳細', again:'再來一局',
+    analysis:'本局分析', aUsage:'使用統計', aShape:'形狀完整度', aReplay:'錯誤回溯', settings:'設定', sMarks:'匹配標記', showArcs:'顯示 Conway 弧線',
+    arcsSub:'關掉可當作困難模式；顏色自動推導', sColors:'拼塊顏色（依種類）', sPresets:'預設組合', sLang:'語言',
+    ratioNote:'kite : dart 比例，與無限鋪砌的理想值 φ 比較。', shapeNote:'實線圓 = 完整半徑（圓內全部鋪滿）；虛線圓 = 同面積的圓。',
+    replayNote:'橘框 = 最遲在這一步就已註定；紅色 = 最後的死局位置。（離線以強制拼塊傳播計算，這裡為示意。）',
+    unit:'單位²', doom:n=>n<=0?'開局圖形就已註定':`最遲在第 ${n} 步就已註定`, overSub:(s,m)=>`共 ${s} 步 · 模式：${m}`,
+    hintPick:'先在下方挑一片拼塊，再移到 <b>淡色圓圈內</b> 的邊界上放下', hintPickTouch:'從下方 <b>拖出</b> 一片拼塊，放開即吸附',
+    hintAim:'移到邊界上找預覽 · <b>滾輪</b> 換方向 · <b>左鍵</b> 放下', hintNoCand:'這裡沒有合法位置，換個地方或換一片',
+    hintPre:(i,n)=>`<b>預放</b>（方向 ${i}/${n}）· 滾輪或點擊換方向 · 右鍵或拖回托盤移除 · 放下一片即確認`,
+    hintPreDead:'這片造成 <b>死局</b>：改方向或移除它；直接放下一片就會結束', hintDrop:'放開即移除預放',
+    hintOver:'遊戲結束', deadTag:'死局：紅色凹處放不進任何拼塊 · 改方向或移除預放，否則放下一片即結束',
+    legendArcs:'弧線需連續、同色才能相接', legendCircle:'淡圈 = 可放置範圍',
+    toastShared:'棋譜連結已複製', toastOneDir:'這個位置只有 1 個合法方向', toastRemoved:'已移除預放', toastNoDead:'沒有出現死局，已停在目前局面',
+    toastFlowNone:'附近沒有可放的凹處', newBest:'新紀錄！', diff:d=>`差 ${d}`, stepsLabel:(k,n)=>`第 ${k}/${n} 步`, jumpDoom:n=>`跳到第 ${n} 步`,
+    uTiles:'片數', uKD:'kite / dart', uArea:'總面積', uRatio:'kite : dart', uMode:'模式比例（參考）', sFull:'完整半徑', sRound:'同面積圓覆蓋率',
+    modeFree:'自由', modeFlow:'心流', mixed:'混合' },
+  en: { area:'Area', tiles:'Tiles', best:'Best', saved:'Auto-saved', free:'Free', flow:'Flow', flowTag:'Flow mode · suggested spot',
+    kiteSub:'kite · 1.539', dartSub:'dart · 0.951', overTitle:'Dead end · Game over', areaScore:'Area score', share:'Share replay', detail:'Details', again:'Play again',
+    analysis:'Game analysis', aUsage:'Usage', aShape:'Shape completeness', aReplay:'Mistake replay', settings:'Settings', sMarks:'Matching marks', showArcs:'Show Conway arcs',
+    arcsSub:'Turn off for hard mode; colours are derived', sColors:'Tile colours (by type)', sPresets:'Presets', sLang:'Language',
+    ratioNote:'kite : dart ratio vs. the infinite-tiling ideal φ.', shapeNote:'Solid circle = full radius (all covered); dashed = circle of equal area.',
+    replayNote:'Orange = doomed by this step at the latest; red = final dead end. (Computed offline by forced-tile propagation; illustrative here.)',
+    unit:'units²', doom:n=>n<=0?'Doomed from the opening':`Doomed by step ${n} at the latest`, overSub:(s,m)=>`${s} steps · mode: ${m}`,
+    hintPick:'Pick a tile below, then move it to an edge <b>inside the faint circle</b>', hintPickTouch:'<b>Drag</b> a tile out of the tray; release to snap',
+    hintAim:'Find a preview on the edge · <b>wheel</b> rotates · <b>click</b> places', hintNoCand:'No legal spot here — move or switch tile',
+    hintPre:(i,n)=>`<b>Pending</b> (orientation ${i}/${n}) · wheel or tap to rotate · right-click or drag to tray to remove · placing the next tile confirms`,
+    hintPreDead:'This tile makes a <b>dead end</b>: rotate or remove it; placing another ends the game', hintDrop:'Release to remove the pending tile',
+    hintOver:'Game over', deadTag:'Dead end: nothing fits the red notch · rotate or remove the pending tile, or the next placement ends the game',
+    legendArcs:'Arcs must continue with the same colour', legendCircle:'Faint circle = placement range',
+    toastShared:'Replay link copied', toastOneDir:'Only 1 legal orientation here', toastRemoved:'Pending tile removed', toastNoDead:'No dead end yet; stopped here',
+    toastFlowNone:'No open notch nearby', newBest:'New best!', diff:d=>`${d} short`, stepsLabel:(k,n)=>`step ${k}/${n}`, jumpDoom:n=>`Go to step ${n}`,
+    uTiles:'Tiles', uKD:'kite / dart', uArea:'Total area', uRatio:'kite : dart', uMode:'Mode share (reference)', sFull:'Full radius', sRound:'Equal-area circle covered',
+    modeFree:'Free', modeFlow:'Flow', mixed:'Mixed' }
+};
+let LANG = 'zh';
+const t = (k, ...a) => { const v = STR[LANG][k]; return typeof v === 'function' ? v(...a) : v; };
+
+/* ===== app state ===== */
+const $ = id => document.getElementById(id);
+const store = { get(k, d) { try { const v = localStorage.getItem('pt.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+                set(k, v) { try { localStorage.setItem('pt.' + k, JSON.stringify(v)); } catch (e) {} } };
+const PRESETS = [
+  { id: 'mist', zh: '霧藍杏', en: 'Mist', K: '#7fa6d6', D: '#ecbc74' },
+  { id: 'sea', zh: '海洋', en: 'Ocean', K: '#3f7fb5', D: '#9fd3e0' },
+  { id: 'forest', zh: '森林', en: 'Forest', K: '#6f9d68', D: '#dcc67f' },
+  { id: 'berry', zh: '莓果', en: 'Berry', K: '#b0618a', D: '#f2c4cb' },
+  { id: 'mono', zh: '灰階', en: 'Mono', K: '#8b9099', D: '#d5d8dc' },
+  { id: 'night', zh: '夜色', en: 'Night', K: '#344a72', D: '#c9a74a' }
+];
+const S = {
+  tiles: [], hasPre: false, preAnchor: null, preRec: null, step: 0, over: false, mode: 'free',
+  selType: null, colors: { K: PRESETS[0].K, D: PRESETS[0].D }, preset: 'mist', arcs: true,
+  best: store.get('best', 38.4), doomN: 0, deadFinal: null
+};
+let IDX = null, CIRCLE = null, DEAD = [], REC = null, CAND = {}, PREOPT = null;
+let rng = Math.random;
+
+function areaOf(tiles) { return tiles.reduce((s, x) => s + AREA[x.type], 0); }
+function confirmedTiles() { return S.hasPre ? S.tiles.slice(0, -1) : S.tiles; }
+
+function refresh(opts = {}) {
+  IDX = buildIndex(S.tiles);
+  CIRCLE = growthCircle(IDX);
+  DEAD = deadSpots(IDX);
+  CAND = {}; PREOPT = null;
+  REC = null;
+  if (S.mode === 'flow' && !S.over) {
+    const last = S.tiles[S.tiles.length - 1];
+    REC = recommendSpot(IDX, CIRCLE, last ? cent(last.V) : CIRCLE.c);
+    if (REC && !opts.noPan) ensureVisible(REC.pt);
+  }
+  updateHud(); updateHint(); dirty = true;
+}
+function candidatesFor(type) {
+  if (CAND[type]) return CAND[type];
+  let cs = allCandidates(IDX, [type], CIRCLE);
+  if (S.mode === 'flow') cs = REC ? cs.filter(c => c.keys.includes(REC.k)) : [];
+  return CAND[type] = cs;
+}
+
+function newGame() {
+  S.tiles = openingPatch(rng).map(x => ({ ...x, step: 0, mode: S.mode }));
+  S.hasPre = false; S.step = 0; S.over = false; S.deadFinal = null; S.preAnchor = null;
+  closeAll(); refresh({ noPan: true }); fitView(); save();
+}
+function save() { const el = $('saved'); el.classList.add('on'); clearTimeout(save.t); save.t = setTimeout(() => el.classList.remove('on'), 900); }
+
+function place(c, anchor) {
+  if (S.over) return;
+  if (DEAD.length) { gameOver(); return; } // Q14 A: placing the next tile confirms the dead pre-tile
+  S.step++;
+  S.tiles.push({ type: c.type, V: c.V, step: S.step, mode: S.mode });
+  S.hasPre = true; S.preAnchor = anchor || c.c; S.preRecPt = REC ? REC.pt : null;
+  refresh(); save();
+}
+function removePre() {
+  if (!S.hasPre || S.over) return;
+  S.tiles.pop(); S.hasPre = false; S.step--; refresh({ noPan: true }); save(); toast(t('toastRemoved'));
+}
+function preOptions() {
+  if (PREOPT) return PREOPT;
+  const pre = S.tiles[S.tiles.length - 1];
+  const conf = confirmedTiles(); const I = buildIndex(conf); const C = growthCircle(I);
+  let cs = allCandidates(I, [pre.type], C);
+  if (S.mode === 'flow' && S.preRecPt) { const recPt = S.preRecPt; cs = cs.filter(c => c.V.some(p => dist(p, recPt) < 1e-5)); }
+  const a = S.preAnchor;
+  cs = cs.filter(c => pointInTile(a, c.V) || dist(c.c, a) < 0.9);
+  if (!cs.some(c => dist(c.c, cent(pre.V)) < 1e-6 && c.V.every((p, i) => dist(p, pre.V[i]) < 1e-6))) cs.push({ type: pre.type, V: pre.V, c: cent(pre.V) });
+  cs.sort((x, y) => Math.atan2(x.c.y - a.y, x.c.x - a.x) - Math.atan2(y.c.y - a.y, y.c.x - a.x));
+  const cur = cs.findIndex(c => c.V.every((p, i) => dist(p, pre.V[i]) < 1e-6));
+  return PREOPT = { cs, cur };
+}
+function cyclePre(dir = 1) {
+  if (!S.hasPre || S.over) return;
+  const { cs, cur } = preOptions();
+  if (cs.length < 2) { toast(t('toastOneDir')); return; }
+  const nx = cs[(cur + dir + cs.length) % cs.length];
+  const pre = S.tiles[S.tiles.length - 1]; pre.V = nx.V;
+  refresh({ noPan: true }); save();
+}
+
+function doomStep() {
+  // Placeholder for offline forced-tile propagation: second-latest tile touching the dead notch.
+  const d = DEAD[0]; if (!d) return S.step;
+  const steps = S.tiles.filter(x => x.V.some(p => dist(p, d.pt) < 1e-5)).map(x => x.step).sort((a, b) => b - a);
+  return steps.length > 1 ? steps[1] : (steps[0] || 0);
+}
+function gameOver() {
+  if (S.over) return;
+  S.over = true; S.hasPre = false; S.deadFinal = DEAD[0] || null; S.doomN = doomStep();
+  const area = areaOf(S.tiles);
+  S.prevBest = S.best; if (area > S.best) { S.best = area; store.set('best', area); }
+  REC = null; updateHud(); updateHint(); dirty = true;
+  setTimeout(showSummary, 450);
+}
+
+/* ===== view / camera ===== */
+const cv = $('board'), ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1, dirty = true;
+const cam = { x: 0, y: 0, s: 40 }, camTarget = { x: 0, y: 0, active: false };
+function resize() {
+  const r = cv.getBoundingClientRect(); DPR = window.devicePixelRatio || 1; W = r.width; H = r.height;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR); dirty = true;
+}
+const toS = p => [W / 2 + (p.x - cam.x) * cam.s, H / 2 - (p.y - cam.y) * cam.s];
+const toW = (sx, sy) => ({ x: (sx - W / 2) / cam.s + cam.x, y: -(sy - H / 2) / cam.s + cam.y });
+function fitView() {
+  const R = CIRCLE ? CIRCLE.R + 0.8 : 4; cam.x = CIRCLE.c.x; cam.y = CIRCLE.c.y;
+  cam.s = Math.max(14, Math.min(70, Math.min(W, H) / (2 * R))); dirty = true;
+}
+function ensureVisible(p) {
+  const [sx, sy] = toS(p); const m = Math.min(W, H) * 0.18;
+  if (sx < m || sx > W - m || sy < m || sy > H - m) { camTarget.x = p.x; camTarget.y = p.y; camTarget.active = true; }
+}
+
+/* ===== drawing ===== */
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function mix(h, to, a) { const c = hexToRgb(h), d = hexToRgb(to); return 'rgb(' + c.map((v, i) => Math.round(v + (d[i] - v) * a)).join(',') + ')'; }
+function lum(h) { const [r, g, b] = hexToRgb(h); return (0.299 * r + 0.587 * g + 0.114 * b) / 255; }
+function arcColors() { // Q10 C: derived from tile colours
+  const L = (lum(S.colors.K) + lum(S.colors.D)) / 2, to = L > 0.45 ? '#000000' : '#ffffff', a = L > 0.45 ? 0.55 : 0.7;
+  return { A: mix(S.colors.D, to, a), B: mix(S.colors.K, to, a) };
+}
+function tilePath(c, V) { c.beginPath(); V.forEach((p, i) => { const [x, y] = toS(p); i ? c.lineTo(x, y) : c.moveTo(x, y); }); c.closePath(); }
+function drawArcs(c, tile, ac, alpha = 1) {
+  const V = tile.V, R = ARC[tile.type], A = ANG[tile.type];
+  for (let i = 0; i < 4; i++) {
+    if (!R[i]) continue;
+    const v = V[i], nx = V[(i + 1) % 4]; const a0 = Math.atan2(nx.y - v.y, nx.x - v.x), sw = A[i] * D2R;
+    c.beginPath();
+    for (let k = 0; k <= 24; k++) { const a = a0 + sw * k / 24; const [x, y] = toS({ x: v.x + R[i] * Math.cos(a), y: v.y + R[i] * Math.sin(a) }); k ? c.lineTo(x, y) : c.moveTo(x, y); }
+    c.strokeStyle = i === 0 ? ac.A : ac.B; c.globalAlpha = alpha; c.lineWidth = Math.max(1.2, cam.s * 0.07); c.lineCap = 'round'; c.stroke(); c.globalAlpha = 1;
+  }
+}
+function drawTile(c, tile, o = {}) {
+  tilePath(c, tile.V);
+  c.fillStyle = S.colors[tile.type]; c.globalAlpha = o.alpha ?? 1; c.fill(); c.globalAlpha = 1;
+  if (S.arcs && !o.noArcs) drawArcs(c, tile, arcColors(), o.alpha ?? 1);
+  tilePath(c, tile.V); c.strokeStyle = o.stroke || 'rgba(30,32,36,.45)'; c.lineWidth = o.lw || 1; c.setLineDash(o.dash || []); c.stroke(); c.setLineDash([]);
+}
+function wedge(c, info, r, fill, stroke) {
+  const v = info.pt, f = info.from || info.edges[0].p; const a0 = Math.atan2(f.y - v.y, f.x - v.x), sw = info.gap * D2R;
+  c.beginPath(); const [cx, cy] = toS(v); c.moveTo(cx, cy);
+  for (let k = 0; k <= 20; k++) { const a = a0 + sw * k / 20; const [x, y] = toS({ x: v.x + r * Math.cos(a), y: v.y + r * Math.sin(a) }); c.lineTo(x, y); }
+  c.closePath(); c.fillStyle = fill; c.fill();
+  if (stroke) { c.strokeStyle = stroke; c.lineWidth = 2.5; c.beginPath(); for (const e of info.edges) { const [x1, y1] = toS(e.p), [x2, y2] = toS(e.q); c.moveTo(x1, y1); c.lineTo(x2, y2); } c.stroke(); }
+}
+let preview = null, hoverW = null, pulse = 0, dragGhost = null;
+function render() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#f3f3f1'; ctx.fillRect(0, 0, W, H);
+  // growth circle (Q9 B)
+  if (CIRCLE && !S.over) {
+    const [cx, cy] = toS(CIRCLE.c);
+    ctx.beginPath(); ctx.arc(cx, cy, CIRCLE.R * cam.s, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(47,111,222,.045)'; ctx.fill(); ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(47,111,222,.35)'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]);
+  }
+  const n = S.tiles.length;
+  S.tiles.forEach((tile, i) => {
+    const isPre = S.hasPre && i === n - 1;
+    if (isPre && dragGhost) return;
+    drawTile(ctx, tile, isPre ? { stroke: DEAD.length ? '#d93636' : '#2f6fde', lw: 2.4, dash: [6, 4] } : {});
+  });
+  // pre-placed badge
+  if (S.hasPre && !dragGhost) {
+    const pre = S.tiles[n - 1]; const [x, y] = toS(cent(pre.V));
+    const lbl = LANG === 'zh' ? '預放' : 'pending';
+    ctx.font = '600 11px ' + getComputedStyle(document.body).fontFamily; const w = ctx.measureText(lbl).width + 10;
+    ctx.fillStyle = DEAD.length ? '#d93636' : '#2f6fde'; roundRect(ctx, x - w / 2, y - 8, w, 16, 8); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lbl, x, y + 0.5);
+  }
+  // dead spots (Q4 E / Q14 A)
+  const deadList = S.over ? (S.deadFinal ? [S.deadFinal] : []) : DEAD;
+  const pa = 0.5 + 0.5 * Math.sin(pulse * 4);
+  for (const d of deadList) {
+    wedge(ctx, d, 0.85, `rgba(217,54,54,${0.25 + 0.25 * pa})`, '#d93636');
+    const [x, y] = toS(d.pt); ctx.beginPath(); ctx.arc(x, y, 10 + 8 * pa, 0, Math.PI * 2); ctx.strokeStyle = `rgba(217,54,54,${0.9 - 0.6 * pa})`; ctx.lineWidth = 2; ctx.stroke();
+  }
+  // flow recommendation (Q12 D)
+  if (REC && !S.over) {
+    wedge(ctx, REC, 0.7, `rgba(47,111,222,${0.18 + 0.15 * pa})`, null);
+    const [x, y] = toS(REC.pt); ctx.beginPath(); ctx.arc(x, y, 7 + 7 * pa, 0, Math.PI * 2); ctx.strokeStyle = '#2f6fde'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fillStyle = '#2f6fde'; ctx.fill();
+  }
+  // preview ghost
+  if (preview && !S.over) drawTile(ctx, preview, { alpha: 0.55, stroke: '#2f6fde', lw: 2, dash: [4, 3] });
+  if (dragGhost) drawTile(ctx, dragGhost, { alpha: 0.6, stroke: '#d93636', lw: 2, dash: [4, 3] });
+}
+function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+let lastT = 0;
+function loop(ts) {
+  const dt = Math.min(0.05, (ts - lastT) / 1000 || 0); lastT = ts; pulse += dt;
+  if (camTarget.active) { cam.x += (camTarget.x - cam.x) * 0.12; cam.y += (camTarget.y - cam.y) * 0.12; if (Math.hypot(camTarget.x - cam.x, camTarget.y - cam.y) < 0.01) camTarget.active = false; dirty = true; }
+  if (dirty || DEAD.length || REC || S.deadFinal) { render(); dirty = false; }
+  requestAnimationFrame(loop);
+}
+
+/* ===== HUD / hint ===== */
+function fmt(x) { return x.toFixed(1); }
+function updateHud() {
+  const a = areaOf(S.tiles);
+  $('sArea').innerHTML = fmt(a) + ' <small style="font-size:11px;color:var(--muted);font-weight:500">' + t('unit') + '</small>';
+  $('sTiles').textContent = S.tiles.length; $('sBest').textContent = fmt(S.best);
+  $('flowtag').style.display = S.mode === 'flow' && REC && !S.over ? 'block' : 'none';
+  const dt = $('deadtag'); dt.style.display = DEAD.length && !S.over ? 'block' : 'none'; dt.textContent = t('deadTag');
+  const ac = arcColors();
+  $('legend').innerHTML = (S.arcs ? `<div><span style="background:${ac.A}"></span><span style="background:${ac.B}"></span>${t('legendArcs')}</div>` : '') + `<div>${t('legendCircle')}</div>`;
+}
+let isTouchUI = matchMedia('(pointer:coarse)').matches;
+function updateHint() {
+  const h = $('hint'); let s;
+  if (S.over) s = t('hintOver');
+  else if (dragGhost) s = t('hintDrop');
+  else if (S.hasPre && DEAD.length) s = t('hintPreDead');
+  else if (S.hasPre && hoverInPre) { const { cs, cur } = preOptions(); s = t('hintPre', cur + 1, cs.length); }
+  else if (S.selType && !isTouchUI) s = preview ? t('hintAim') : (hoverW ? t('hintNoCand') : t('hintAim'));
+  else if (S.hasPre) { const { cs, cur } = preOptions(); s = t('hintPre', cur + 1, cs.length); }
+  else s = isTouchUI ? t('hintPickTouch') : t('hintPick');
+  h.innerHTML = s;
+}
+
+/* ===== interaction (Q11 D) ===== */
+let hoverInPre = false, ptr = null, pinch = null, previewGroupKey = null, previewIdx = 0;
+const pointers = new Map();
+function inPre(w) { return S.hasPre && pointInTile(w, S.tiles[S.tiles.length - 1].V); }
+function computePreview(w) {
+  if (!S.selType || S.over || !w) { preview = null; return; }
+  const cs = candidatesFor(S.selType);
+  if (!cs.length) { preview = null; return; }
+  const sorted = cs.map(c => ({ c, d: dist(c.c, w) })).sort((a, b) => a.d - b.d);
+  if (sorted[0].d > 1.7) { preview = null; return; }
+  const group = sorted.filter(x => x.d <= sorted[0].d + 0.9 && x.d < 2.2).map(x => x.c);
+  group.sort((a, b) => Math.atan2(a.c.y - w.y, a.c.x - w.x) - Math.atan2(b.c.y - w.y, b.c.x - w.x));
+  const gk = group.map(c => c.c.x.toFixed(3) + c.c.y.toFixed(3)).sort().join('|');
+  if (gk !== previewGroupKey) { previewGroupKey = gk; previewIdx = group.indexOf(sorted[0].c); }
+  preview = { ...group[((previewIdx % group.length) + group.length) % group.length], group };
+}
+function localXY(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+function overTray(e) { const r = $('tray').getBoundingClientRect(); return e.clientY >= r.top && e.clientX >= r.left && e.clientX <= r.right; }
+
+cv.addEventListener('pointerdown', e => {
+  if (S.over) return;
+  cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId, localXY(e));
+  if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), s: cam.s }; ptr = null; return; }
+  const [x, y] = localXY(e), w = toW(x, y);
+  if (e.button === 2) return;
+  ptr = { id: e.pointerId, x0: x, y0: y, x, y, moved: false, onPre: inPre(w), type: e.pointerType, cam0: { x: cam.x, y: cam.y } };
+});
+cv.addEventListener('pointermove', e => {
+  const [x, y] = localXY(e);
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, [x, y]);
+  if (pinch && pointers.size === 2) { const [a, b] = [...pointers.values()]; cam.s = Math.max(10, Math.min(120, pinch.s * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d)); dirty = true; return; }
+  const w = toW(x, y); hoverW = w;
+  if (ptr && ptr.id === e.pointerId) {
+    if (!ptr.moved && Math.hypot(x - ptr.x0, y - ptr.y0) > 7) ptr.moved = true;
+    if (ptr.moved && ptr.onPre) { // drag pre-tile back to tray to remove
+      const pre = S.tiles[S.tiles.length - 1], c0 = cent(pre.V);
+      dragGhost = { type: pre.type, V: pre.V.map(p => ({ x: p.x - c0.x + w.x, y: p.y - c0.y + w.y })) };
+      $('tray').classList.toggle('drop', overTray(e)); updateHint(); dirty = true; return;
+    }
+    if (ptr.moved && !ptr.onPre) { cam.x = ptr.cam0.x - (x - ptr.x0) / cam.s; cam.y = ptr.cam0.y + (y - ptr.y0) / cam.s; camTarget.active = false; dirty = true; }
+  }
+  if (e.pointerType === 'mouse') {
+    const ip = inPre(w); if (ip !== hoverInPre) { hoverInPre = ip; }
+    if (!ip) computePreview(w); else preview = null;
+    cv.style.cursor = ip ? 'pointer' : (preview ? 'copy' : 'default');
+    updateHint(); dirty = true;
+  }
+});
+function endPtr(e) {
+  pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null;
+  if (!ptr || ptr.id !== e.pointerId) return;
+  const p = ptr; ptr = null;
+  if (p.onPre && p.moved) { const drop = overTray(e); dragGhost = null; $('tray').classList.remove('drop'); if (drop) removePre(); else dirty = true; updateHint(); return; }
+  if (p.moved) return;
+  if (p.onPre) { cyclePre(1); return; } // tap / click on pending tile cycles
+  if (p.type === 'mouse' && preview && S.selType) { const c = preview; preview = null; place(c, hoverW); computePreview(hoverW); }
+}
+cv.addEventListener('pointerup', endPtr);
+cv.addEventListener('pointercancel', endPtr);
+cv.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !ptr) { preview = null; hoverW = null; hoverInPre = false; updateHint(); dirty = true; } });
+cv.addEventListener('contextmenu', e => { e.preventDefault(); const [x, y] = localXY(e); if (inPre(toW(x, y))) removePre(); });
+cv.addEventListener('wheel', e => {
+  e.preventDefault(); const [x, y] = localXY(e); const w = toW(x, y); const dir = e.deltaY > 0 ? 1 : -1;
+  if (!e.ctrlKey && inPre(w)) { cyclePre(dir); return; }
+  if (!e.ctrlKey && S.selType && preview && preview.group.length > 1) { previewIdx += dir; computePreview(w); dirty = true; return; }
+  const before = toW(x, y); cam.s = Math.max(10, Math.min(120, cam.s * (dir > 0 ? 0.9 : 1.1))); const after = toW(x, y);
+  cam.x += before.x - after.x; cam.y += before.y - after.y; dirty = true;
+}, { passive: false });
+
+// tray: click to select (mouse), drag out to place (touch & mouse)
+document.querySelectorAll('.piece').forEach(el => {
+  el.addEventListener('pointerdown', e => {
+    if (S.over) return; e.preventDefault();
+    const type = el.dataset.t; const touch = e.pointerType !== 'mouse';
+    const d = { type, x0: e.clientX, y0: e.clientY, moved: false, touch, prevSel: S.selType };
+    S.selType = type; syncTray();
+    const mv = ev => {
+      if (!d.moved && Math.hypot(ev.clientX - d.x0, ev.clientY - d.y0) > 8) d.moved = true;
+      if (!d.moved) return;
+      const r = cv.getBoundingClientRect(); const yOff = touch ? 70 : 0; // preview above the finger
+      const x = ev.clientX - r.left, y = ev.clientY - r.top - yOff;
+      hoverW = (y >= 0 && y <= r.height) ? toW(x, y) : null; computePreview(hoverW); updateHint(); dirty = true;
+    };
+    const up = ev => {
+      window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up);
+      if (!d.moved) { S.selType = d.prevSel === type ? null : type; syncTray(); preview = null; updateHint(); dirty = true; return; }
+      if (preview) { const c = preview; preview = null; place(c, hoverW); }
+      if (touch) { preview = null; hoverW = null; }
+      updateHint(); dirty = true;
+    };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  });
+});
+function syncTray() { document.querySelectorAll('.piece').forEach(el => el.classList.toggle('on', el.dataset.t === S.selType)); }
+function tileSvg(type, K, D) {
+  const pts = TPL[type].map(([x, y]) => `${x.toFixed(3)},${(-y).toFixed(3)}`).join(' ');
+  return `<polygon points="${pts}" fill="${type === 'K' ? K : D}" stroke="rgba(30,32,36,.5)" stroke-width="0.04"/>`;
+}
+function paintTray() { document.querySelectorAll('.piece').forEach(el => el.querySelector('svg').innerHTML = tileSvg(el.dataset.t, S.colors.K, S.colors.D)); }
+
+$('zIn').onclick = () => { cam.s = Math.min(120, cam.s * 1.2); dirty = true; };
+$('zOut').onclick = () => { cam.s = Math.max(10, cam.s / 1.2); dirty = true; };
+$('zFit').onclick = () => fitView();
+
+// mode switch (Q12 / Q15)
+$('modeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return; S.mode = b.dataset.m;
+  [...$('modeSeg').children].forEach(x => x.classList.toggle('on', x === b));
+  refresh(); if (S.mode === 'flow' && !REC && !S.over) toast(t('toastFlowNone'));
+});
+
+/* ===== summary + analysis (Q13) ===== */
+function modeLabel() {
+  const ms = S.tiles.filter(x => x.step > 0).map(x => x.mode); if (!ms.length) return t('modeFree');
+  const f = ms.filter(m => m === 'flow').length; return f === 0 ? t('modeFree') : f === ms.length ? t('modeFlow') : t('mixed');
+}
+function showSummary() {
+  const a = areaOf(S.tiles), nK = S.tiles.filter(x => x.type === 'K').length, nD = S.tiles.length - nK;
+  $('overSub').textContent = t('overSub', S.step, modeLabel());
+  $('mArea').innerHTML = fmt(a) + '<small>' + t('unit') + '</small>';
+  $('mTiles').innerHTML = `${S.tiles.length} <small>kite ${nK} / dart ${nD}</small>`;
+  const isBest = a >= S.best - 1e-9 && a > S.prevBest;
+  $('mBest').innerHTML = isBest ? `<span class="newbest">${fmt(a)}</span> <small>${t('newBest')}</small>` : `${fmt(S.best)} <small>${t('diff', fmt(S.best - a))}</small>`;
+  $('mDoom').textContent = t('doom', S.doomN);
+  $('summary').classList.add('show');
+}
+function closeAll() { $('summary').classList.remove('show'); $('analysis').classList.remove('show'); $('settings').classList.remove('show'); }
+$('bAgain').onclick = () => newGame();
+$('bShare').onclick = () => {
+  const code = btoa(S.tiles.map(x => x.type + x.step).join('.')).slice(0, 28);
+  const link = 'penrose-tiling.app/r#' + code;
+  try { navigator.clipboard && navigator.clipboard.writeText(link).catch(() => {}); } catch (e) {}
+  toast(t('toastShared') + ' · ' + link);
+};
+$('bDetail').onclick = () => { $('summary').classList.remove('show'); openAnalysis(); };
+$('aBack').onclick = () => { $('analysis').classList.remove('show'); $('summary').classList.add('show'); stopReplay(); };
+
+function boundaryDistance(I, p) {
+  let m = Infinity;
+  for (const e of I.boundary) {
+    const a = e.p, b = e.q, L2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+    let u = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / L2; u = Math.max(0, Math.min(1, u));
+    m = Math.min(m, dist(p, { x: a.x + u * (b.x - a.x), y: a.y + u * (b.y - a.y) }));
+  }
+  return m;
+}
+function openAnalysis() {
+  $('analysis').classList.add('show');
+  const I = buildIndex(S.tiles), a = I.area, nK = S.tiles.filter(x => x.type === 'K').length, nD = S.tiles.length - nK;
+  const ratio = nD ? nK / nD : nK;
+  const moves = S.tiles.filter(x => x.step > 0), fl = moves.filter(x => x.mode === 'flow').length;
+  const pf = moves.length ? Math.round(100 * (moves.length - fl) / moves.length) : 100;
+  $('aUsage').innerHTML = [[t('uTiles'), S.tiles.length], [t('uKD'), `${nK} / ${nD}`], [t('uArea'), fmt(a) + ' ' + t('unit')], [t('uRatio'), ratio.toFixed(3)],
+    [t('uMode'), `${t('modeFree')} ${pf}% / ${t('modeFlow')} ${100 - pf}%`]].map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('');
+  const bar = $('ratioBar'); bar.querySelector('.fill').style.width = Math.min(100, ratio / 3 * 100) + '%'; bar.querySelector('.mk').style.left = (PHI / 3 * 100) + '%';
+  // shape completeness
+  const c = I.centroid, fullR = pointInAny(c) ? boundaryDistance(I, c) : 0, eqR = Math.sqrt(a / Math.PI);
+  let inside = 0, N = 1500; for (let i = 0; i < N; i++) { const r = eqR * Math.sqrt(Math.random()), th = Math.random() * 2 * Math.PI; if (pointInAny({ x: c.x + r * Math.cos(th), y: c.y + r * Math.sin(th) })) inside++; }
+  $('aShape').innerHTML = `<div class="kv"><span>${t('sFull')}</span><b>${fullR.toFixed(2)}</b></div><div class="kv"><span>${t('sRound')}</span><b>${Math.round(100 * inside / N)}%</b></div>`;
+  requestAnimationFrame(() => { drawMini($('shapeCv'), S.tiles, { circles: [[c, fullR, false], [c, eqR, true]] }); setupReplay(); });
+}
+function pointInAny(p) { return S.tiles.some(x => pointInTile(p, x.V)); }
+function drawMini(canvas, tiles, o = {}) {
+  const r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1; canvas.width = r.width * d; canvas.height = r.height * d;
+  const c = canvas.getContext('2d'); c.setTransform(d, 0, 0, d, 0, 0); c.clearRect(0, 0, r.width, r.height);
+  const all = S.tiles.flatMap(x => x.V); const xs = all.map(p => p.x), ys = all.map(p => p.y);
+  const bx = [Math.min(...xs), Math.max(...xs)], by = [Math.min(...ys), Math.max(...ys)];
+  const s = Math.min((r.width - 20) / (bx[1] - bx[0]), (r.height - 20) / (by[1] - by[0]));
+  const cx = (bx[0] + bx[1]) / 2, cy = (by[0] + by[1]) / 2;
+  const T = p => [r.width / 2 + (p.x - cx) * s, r.height / 2 - (p.y - cy) * s];
+  const path = V => { c.beginPath(); V.forEach((p, i) => { const [x, y] = T(p); i ? c.lineTo(x, y) : c.moveTo(x, y); }); c.closePath(); };
+  if (o.ghostAll) S.tiles.forEach(x => { path(x.V); c.strokeStyle = 'rgba(0,0,0,.12)'; c.lineWidth = 1; c.stroke(); });
+  tiles.forEach(x => { path(x.V); c.fillStyle = S.colors[x.type]; c.fill(); c.strokeStyle = 'rgba(30,32,36,.45)'; c.lineWidth = 1; c.stroke(); });
+  if (o.mark) { path(o.mark.V); c.strokeStyle = '#f08c00'; c.lineWidth = 3; c.stroke(); }
+  if (o.dead) { const [x, y] = T(o.dead.pt); c.beginPath(); c.arc(x, y, 9, 0, Math.PI * 2); c.fillStyle = 'rgba(217,54,54,.35)'; c.fill(); c.strokeStyle = '#d93636'; c.lineWidth = 2; c.stroke(); }
+  if (o.last) { path(o.last.V); c.strokeStyle = '#2f6fde'; c.lineWidth = 2; c.setLineDash([4, 3]); c.stroke(); c.setLineDash([]); }
+  (o.circles || []).forEach(([p, R, dash]) => { const [x, y] = T(p); c.beginPath(); c.arc(x, y, R * s, 0, Math.PI * 2); c.setLineDash(dash ? [5, 4] : []); c.strokeStyle = dash ? '#6b7280' : '#2f6fde'; c.lineWidth = 1.6; c.stroke(); c.setLineDash([]); });
+}
+let replayTimer = null;
+function setupReplay() {
+  const sl = $('rSlider'); sl.max = S.step; sl.value = S.step; $('rDoom').textContent = t('jumpDoom', S.doomN);
+  drawReplay();
+}
+function drawReplay() {
+  const k = +$('rSlider').value; const shown = S.tiles.filter(x => x.step <= k);
+  const mark = S.tiles.find(x => x.step === S.doomN && x.step > 0);
+  drawMini($('replayCv'), shown, { ghostAll: true, mark: k >= S.doomN ? mark : null, dead: k === S.step ? S.deadFinal : null, last: shown.find(x => x.step === k && k > 0) });
+  $('rLabel').textContent = t('stepsLabel', k, S.step);
+}
+function stopReplay() { clearInterval(replayTimer); replayTimer = null; $('rPlay').textContent = '▶'; }
+$('rSlider').oninput = () => { stopReplay(); drawReplay(); };
+$('rDoom').onclick = () => { stopReplay(); $('rSlider').value = S.doomN; drawReplay(); };
+$('rPlay').onclick = () => {
+  if (replayTimer) return stopReplay();
+  const sl = $('rSlider'); if (+sl.value >= S.step) sl.value = 0; $('rPlay').textContent = '❚❚';
+  replayTimer = setInterval(() => { sl.value = +sl.value + 1; drawReplay(); if (+sl.value >= S.step) stopReplay(); }, 380);
+};
+
+/* ===== settings (Q8 A, Q10 C, Q19 B) ===== */
+$('openSettings').onclick = () => $('settings').classList.add('show');
+$('closeSettings').onclick = () => $('settings').classList.remove('show');
+$('tgArcs').onclick = () => { S.arcs = !S.arcs; $('tgArcs').classList.toggle('on', S.arcs); updateHud(); dirty = true; };
+function paintPresets() {
+  $('presets').innerHTML = PRESETS.map(p => `<div class="preset${S.preset === p.id ? ' on' : ''}" data-p="${p.id}"><svg viewBox="-0.1 -1.1 4.4 2.2">${tileSvg('K', p.K, p.D)}<g transform="translate(2.1 0)">${tileSvg('D', p.K, p.D)}</g></svg>${p[LANG]}</div>`).join('');
+}
+$('presets').addEventListener('click', e => {
+  const el = e.target.closest('.preset'); if (!el) return; const p = PRESETS.find(x => x.id === el.dataset.p);
+  S.preset = p.id; S.colors = { K: p.K, D: p.D }; applyColors();
+});
+$('cK').oninput = e => { S.colors.K = e.target.value; S.preset = null; applyColors(); };
+$('cD').oninput = e => { S.colors.D = e.target.value; S.preset = null; applyColors(); };
+function applyColors() { $('cK').value = S.colors.K; $('cD').value = S.colors.D; paintPresets(); paintTray(); updateHud(); dirty = true; }
+$('langSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return; LANG = b.dataset.l;
+  [...$('langSeg').children].forEach(x => x.classList.toggle('on', x === b)); applyLang();
+});
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh' ? 'zh-Hant-TW' : 'en';
+  document.querySelectorAll('[data-i]').forEach(el => { el.textContent = t(el.dataset.i); });
+  paintPresets(); updateHud(); updateHint();
+  if ($('summary').classList.contains('show')) showSummary();
+  if ($('analysis').classList.contains('show')) openAnalysis();
+}
+
+/* ===== prototype-only controls ===== */
+function toast(msg) { const el = $('toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 1800); }
+$('pNew').onclick = () => newGame();
+$('pEnd').onclick = () => { if (!S.over) gameOver(); else showSummary(); };
+let autoRun = false;
+$('pAuto').onclick = () => {
+  if (S.over || autoRun) return; autoRun = true; let n = 0;
+  const stepFn = () => {
+    for (let k = 0; k < 2; k++) {
+      if (DEAD.length || n > 160) { autoRun = false; if (!DEAD.length) toast(t('toastNoDead')); return; }
+      let cs = allCandidates(IDX, ['K', 'D'], CIRCLE);
+      if (S.mode === 'flow' && REC) cs = cs.filter(c => c.keys.includes(REC.k));
+      if (!cs.length) { autoRun = false; toast(t('toastNoDead')); return; }
+      cs.sort((a, b) => dist(a.c, CIRCLE.c) - dist(b.c, CIRCLE.c));
+      const c = cs[Math.floor(Math.random() * Math.ceil(cs.length * 0.35))];
+      place(c, c.c); n++;
+    }
+    setTimeout(stepFn, 120);
+  };
+  stepFn();
+};
+
+/* ===== boot ===== */
+window.addEventListener('resize', () => { resize(); });
+resize(); applyColors(); applyLang(); syncTray(); newGame();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
