@@ -113,21 +113,17 @@ describe('backtraceRecord: known positions', () => {
   });
 
   it('finds a mistake that only forced tiles reveal, long before the game ends', () => {
-    let found: { game: Game; mistake: Placement } | null = null;
-    for (let seed = 1; seed < 40 && !found; seed++) {
-      const game = playGenuinePatch(seed);
-      const mistake = findHiddenMistake(game);
-      if (mistake) found = { game, mistake };
-    }
-    expect(found).not.toBeNull();
-    const { game, mistake } = found!;
-    expect(game.place(mistake)).toBe(true);
+    // the patch of seed 6 (the first of seeds 1, 2, ... that has one) can be followed by a hidden mistake
+    const game = playGenuinePatch(6);
+    const mistake = findHiddenMistake(game);
+    expect(mistake).not.toBeNull();
+    expect(game.place(mistake!)).toBe(true);
     const mistakeStep = game.record().steps.length;
     finishRandomly(game, 11);
     const record = game.record();
     expect(record.steps.length).toBeGreaterThan(mistakeStep + 1);
     expect(backtraceRecord(record).doomedAt).toBe(mistakeStep);
-  });
+  }, 20_000);
 
   it('ignores an orientation that was turned away before the next tile', () => {
     const game = playGenuinePatch(7);

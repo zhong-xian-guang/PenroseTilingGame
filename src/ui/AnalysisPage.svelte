@@ -9,11 +9,13 @@
   import type { Palette } from '../board/renderer';
   import { t } from '../i18n/index.svelte';
   import Replay from './Replay.svelte';
+  import { deliverRecord } from '../share/deliver';
 
   let {
     open,
     record,
     backtrace,
+    shared = false,
     palette,
     showArcs,
     onback,
@@ -22,6 +24,8 @@
     record: GameRecord | null;
     /** Undefined while it runs, null when unavailable. */
     backtrace: Backtrace | null | undefined;
+    /** The record came from someone else (ticket 11): a share link or an imported file. */
+    shared?: boolean;
     palette?: Palette;
     showArcs?: boolean;
     onback: () => void;
@@ -29,6 +33,22 @@
 
   /** The replay's current frame (bound to Replay, so "go to step N" can seek). */
   let replayIndex = $state(0);
+  /** Outcome of the last "Share record" press, shown next to the button. */
+  let shareStatus = $state<'copied' | 'file' | 'failed' | null>(null);
+  $effect(() => {
+    void record;
+    shareStatus = null;
+  });
+  const share = async () => {
+    if (!record) return;
+    shareStatus = null;
+    try {
+      const outcome = await deliverRecord(record);
+      if (outcome === 'copied' || outcome === 'file') shareStatus = outcome;
+    } catch {
+      shareStatus = 'failed';
+    }
+  };
 
   let dialog: HTMLDialogElement;
 
@@ -60,7 +80,16 @@
   <header>
     <button type="button" class="back" onclick={onback}>{t('analysis.back')}</button>
     <h2 id="analysis-title">{t('analysis.title')}</h2>
+    <button type="button" class="back share" onclick={share} disabled={!record}>{t('share.button')}</button>
   </header>
+  {#if shareStatus}
+    <p class="note" role="status">
+      {shareStatus === 'copied' ? t('share.copied') : shareStatus === 'file' ? t('share.file') : t('share.failed')}
+    </p>
+  {/if}
+  {#if shared}
+    <p class="note">{t('share.viewing')}</p>
+  {/if}
 
   {#if stats}
     <section>
@@ -134,14 +163,16 @@
       <p class="modes">{t('analysis.modesValue', { free: freePct, flow: 100 - freePct })}</p>
     </section>
 
+    <!-- a game that is not over (e.g. a shared record of one in progress) has nothing to trace back -->
+    {#if backtrace?.doomedAt !== null}
     <section>
       <h3>{t('analysis.backtrace')}</h3>
       {#if backtrace === undefined}
         <p class="muted">{t('analysis.backtracePending')}</p>
-      {:else if backtrace === null || backtrace.doomedAt === null}
+      {:else if backtrace === null}
         <p class="muted">{t('analysis.backtraceUnavailable')}</p>
       {:else}
-        {@const n = backtrace.doomedAt}
+        {@const n = backtrace.doomedAt ?? 0}
         <div class="doomed">
           <p><strong>{t('analysis.backtraceValue', { n })}</strong></p>
           <button type="button" class="jump" onclick={() => (replayIndex = n)}>
@@ -151,6 +182,7 @@
         <p class="hint">{t('analysis.backtraceHint')}</p>
       {/if}
     </section>
+    {/if}
 
     <section>
       <h3>{t('analysis.replay')}</h3>
@@ -202,6 +234,14 @@
     font: inherit;
     font-size: 14px;
     cursor: pointer;
+  }
+  .share {
+    margin-left: auto;
+  }
+  .note {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--muted);
   }
   section {
     margin-top: 16px;

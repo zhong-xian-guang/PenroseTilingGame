@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type Backtrace, type GameRecord, type Score, type TileKind } from '../engine';
+  import { createGame, openingPatch, ORIGIN, P2, RECORD_VERSION, toXY, type Backtrace, type Game, type GameRecord, type Score, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE, type Palette } from '../board/renderer';
   import { derivePalette } from '../settings/palette';
@@ -13,6 +13,7 @@
   import GameOverDialog from './GameOverDialog.svelte';
   import AnalysisPage from './AnalysisPage.svelte';
   import { t } from '../i18n/index.svelte';
+  import { readRecordFile, readShareHash, ShareError } from '../share/share';
 
   /** A fresh game starting from a random opening patch. */
   const newGame = (): Game => {
@@ -33,8 +34,61 @@
   /** The analysis page is open (in place of the summary); it shows `analysisRecord`. */
   let analysisOpen = $state(false);
   let analysisRecord = $state.raw<GameRecord | null>(null);
-  /** Mistake backtrace of the finished game (ticket 10): undefined while it runs in the background, null if unavailable. */
-  let backtrace = $state.raw<Backtrace | null | undefined>(undefined);
+  /** The record of the finished own game (fixed once it is over). */
+  let finishedRecord: GameRecord | null = null;
+  /**
+   * Mistake backtraces (ticket 10), computed in the background: of the finished own game (for the summary)
+   * and of the record on the analysis page. Undefined while running, null if unavailable.
+   */
+  let summaryBacktrace = $state.raw<Backtrace | null | undefined>(undefined);
+  let analysisBacktrace = $state.raw<Backtrace | null | undefined>(undefined);
+  $effect(() => {
+    const record = analysisRecord;
+    analysisBacktrace = undefined;
+    if (!record) return;
+    void backtraceInBackground(record).then((b) => {
+      if (analysisRecord === record) analysisBacktrace = b;
+    });
+  });
+  /**
+   * The analysis page shows someone else's record (share link or imported file, ticket 11). Such a record is
+   * only replayed for viewing: the own game, its autosave and the personal best are never touched.
+   */
+  let analysisShared = $state(false);
+  /** Why a shared record could not be opened. */
+  let shareError = $state<ShareError | null>(null);
+  let shareErrorDialog: HTMLDialogElement;
+  $effect(() => {
+    if (shareError && !shareErrorDialog.open) shareErrorDialog.showModal();
+  });
+
+  const viewShared = (record: GameRecord) => {
+    analysisRecord = record;
+    analysisShared = true;
+    analysisOpen = true;
+  };
+  const showShareError = (e: unknown) => {
+    shareError = e instanceof ShareError ? e : new ShareError('malformed');
+  };
+  /** Opens the record in the page address (`#r=…`), then drops it from the address so a reload does not reopen it. */
+  const openSharedLink = async () => {
+    try {
+      const record = await readShareHash(location.hash);
+      if (!record) return;
+      history.replaceState(null, '', location.pathname + location.search);
+      viewShared(record);
+    } catch (e) {
+      history.replaceState(null, '', location.pathname + location.search);
+      showShareError(e);
+    }
+  };
+  const importRecord = async (file: File) => {
+    try {
+      viewShared(readRecordFile(await file.text()));
+    } catch (e) {
+      showShareError(e);
+    }
+  };
 
   const recompute = () => {
     selected = game.selectedKind();
@@ -47,11 +101,11 @@
       void submitScore(finished.tileSet.id, finished.score()).then((c) => {
         if (game === finished) best = c;
       });
-      // the record of a finished game never changes: the summary and the analysis page share it
-      analysisRecord = finished.record();
-      backtrace = undefined;
-      void backtraceInBackground(analysisRecord).then((b) => {
-        if (game === finished) backtrace = b;
+      // the record of a finished game never changes: the summary and the analysis page share it (and its backtrace)
+      finishedRecord = finished.record();
+      summaryBacktrace = undefined;
+      void backtraceInBackground(finishedRecord).then((b) => {
+        if (game === finished) summaryBacktrace = b;
       });
     }
   };
@@ -101,6 +155,7 @@
 
   const startNewGame = () => {
     analysisOpen = false;
+    finishedRecord = null;
     game = newGame();
     attach();
     void autosave?.track(game);
@@ -109,6 +164,9 @@
   onMount(() => {
     attach();
     void displaySettings.load();
+    void openSharedLink();
+    const onHash = () => void openSharedLink();
+    addEventListener('hashchange', onHash);
     let alive = true;
     void (async () => {
       const store = await Autosave.open();
@@ -125,6 +183,7 @@
     })();
     return () => {
       alive = false;
+      removeEventListener('hashchange', onHash);
       autosave?.detach();
       offGame?.();
       offGame = null;
@@ -158,7 +217,7 @@
     <div><span class="label">{t('hud.area')}</span> <strong>{score.area.toFixed(2)}</strong></div>
   </header>
 
-  <Menu />
+  <Menu onimport={importRecord} />
 
   <button type="button" class="new-game" onclick={startNewGame}>{t('game.new')}</button>
 
@@ -202,18 +261,42 @@
     open={over && !analysisOpen}
     {score}
     {best}
-    doomedAt={backtrace === undefined ? undefined : (backtrace?.doomedAt ?? null)}
-    ondetails={() => (analysisOpen = true)}
+    doomedAt={summaryBacktrace === undefined ? undefined : (summaryBacktrace?.doomedAt ?? null)}
+    ondetails={() => {
+      analysisRecord = finishedRecord ?? game.record();
+      analysisShared = false;
+      analysisOpen = true;
+    }}
     onnewgame={startNewGame}
   />
   <AnalysisPage
     open={analysisOpen}
     record={analysisRecord}
-    {backtrace}
+    backtrace={analysisBacktrace}
+    shared={analysisShared}
     {palette}
     showArcs={displaySettings.value.showArcs}
     onback={() => (analysisOpen = false)}
   />
+
+  <dialog
+    bind:this={shareErrorDialog}
+    class="share-error"
+    aria-labelledby="share-error-title"
+    onclose={() => (shareError = null)}
+  >
+    <h2 id="share-error-title">{t('share.error.title')}</h2>
+    <p>
+      {#if shareError?.reason === 'version'}
+        {t('share.error.version', { version: shareError.version ?? '?', expected: RECORD_VERSION })}
+      {:else}
+        {t('share.error.malformed')}
+      {/if}
+    </p>
+    <form method="dialog">
+      <button type="submit">{t('share.error.close')}</button>
+    </form>
+  </dialog>
 </main>
 
 <style>
@@ -296,6 +379,43 @@
   }
   footer > :global(*) {
     pointer-events: auto;
+  }
+  .share-error {
+    width: min(420px, calc(100vw - 32px));
+    padding: 20px 24px;
+    border: none;
+    border-radius: 16px;
+    background: var(--bg);
+    color: var(--ink);
+    box-shadow: 0 8px 40px #0003;
+  }
+  .share-error::backdrop {
+    background: #0004;
+  }
+  .share-error h2 {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 800;
+  }
+  .share-error p {
+    margin: 0 0 12px;
+    line-height: 1.6;
+    font-size: 14px;
+  }
+  .share-error form {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .share-error button {
+    height: 36px;
+    padding: 0 16px;
+    border: none;
+    border-radius: 10px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
   }
   .hint {
     margin: 0;

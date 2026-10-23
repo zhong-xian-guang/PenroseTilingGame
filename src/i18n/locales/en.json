@@ -70,5 +70,15 @@
   "analysis.play": "Play",
   "analysis.pause": "Pause",
   "analysis.seek": "Replay position",
-  "analysis.step": "Step {n} / {total}"
+  "analysis.step": "Step {n} / {total}",
+  "share.button": "Share record",
+  "share.copied": "Share link copied",
+  "share.file": "Too long for a link, so the record was saved as a file",
+  "share.failed": "Could not share this record",
+  "share.viewing": "A shared record. Your own game in progress and your personal best are not affected.",
+  "share.open": "Open record",
+  "share.error.title": "Cannot open this record",
+  "share.error.version": "This record comes from a different version of the game (record format {version}; this version reads only format {expected}).",
+  "share.error.malformed": "This link or file is not a valid game record.",
+  "share.error.close": "OK"
 }
