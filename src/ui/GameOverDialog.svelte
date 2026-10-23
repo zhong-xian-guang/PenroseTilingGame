@@ -4,16 +4,7 @@
    * The fuller summary (personal best, "doomed since step N", details) is ticket 09.
    */
   import type { Score } from '../engine';
-
-  // UI strings kept together so they can move into the i18n catalogue (ticket 13).
-  const text = {
-    title: '遊戲結束',
-    reason: '鋪砌邊界出現了放不進任何拼塊的凹洞。',
-    area: '面積',
-    areaUnit: '平方單位',
-    tiles: '片數',
-    newGame: '開新局',
-  };
+  import { t } from '../i18n/index.svelte';
 
   let { open, score, onnewgame }: { open: boolean; score: Score; onnewgame: () => void } = $props();
 
@@ -26,19 +17,19 @@
 </script>
 
 <dialog bind:this={dialog} oncancel={(e) => e.preventDefault()} aria-labelledby="game-over-title">
-  <h2 id="game-over-title">{text.title}</h2>
-  <p class="reason">{text.reason}</p>
+  <h2 id="game-over-title">{t('gameOver.title')}</h2>
+  <p class="reason">{t('gameOver.reason')}</p>
   <dl>
     <div>
-      <dt>{text.area}</dt>
-      <dd><strong>{score.area.toFixed(2)}</strong> <span class="unit">{text.areaUnit}</span></dd>
+      <dt>{t('hud.area')}</dt>
+      <dd><strong>{score.area.toFixed(2)}</strong> <span class="unit">{t('gameOver.areaUnit')}</span></dd>
     </div>
     <div>
-      <dt>{text.tiles}</dt>
+      <dt>{t('hud.tiles')}</dt>
       <dd><strong>{score.tiles}</strong></dd>
     </div>
   </dl>
-  <button type="button" onclick={onnewgame}>{text.newGame}</button>
+  <button type="button" onclick={onnewgame}>{t('game.new')}</button>
 </dialog>
 
 <style>

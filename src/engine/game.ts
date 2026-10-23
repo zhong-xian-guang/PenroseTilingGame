@@ -4,7 +4,8 @@
  */
 import { edgeDirection, placementVertices, type Placement } from './geometry';
 import { P2 } from './p2';
-import { DIRECTIONS, ORIGIN, pointKey, toXY, type Point } from './point';
+import { DIRECTIONS, mod10, ORIGIN, pointKey, toXY, type Point } from './point';
+import type { GameRecord, RecordStep } from './record';
 import { centerOf, placementKey, Tiling } from './tiling';
 import { shapeOf, type CornerRef, type TileKind, type TileSet } from './tileset';
 
@@ -18,6 +19,8 @@ export interface GameOptions {
   readonly tileSet?: TileSet;
   /** The opening patch (trusted, not validated). Defaults to a single kite at the origin. */
   readonly opening?: readonly Placement[];
+  /** The seed `opening` was generated from, kept in the record for reference. */
+  readonly seed?: number;
 }
 
 export interface Game {
@@ -64,6 +67,12 @@ export interface Game {
   deadEnds(): readonly DeadEnd[];
   /** Score of the confirmed tiling: its tile count and total area in squared length units. */
   score(): Score;
+  /**
+   * The game record so far: tile set, opening, and every step that changed
+   * the board (places, turns and removals of the pending tile), in order.
+   * `replayRecord` rebuilds this exact position from it.
+   */
+  record(): GameRecord;
 
   // ---- commands ----
   /** Pick a tile kind from the tray (or clear the pick with null). */
@@ -151,7 +160,28 @@ function classify(tileSet: TileSet, corners: readonly CornerRef[]): string | nul
   return null;
 }
 
+/** The tile sets a record can name. */
+const TILE_SETS: Readonly<Record<string, TileSet>> = { [P2.id]: P2 };
+
 export function createGame(options: GameOptions = {}): Game {
+  return build(options).game;
+}
+
+/**
+ * Rebuilds a game by replaying its record through the engine. Throws when the
+ * tile set is unknown or a step is not legal at its point in the game.
+ */
+export function replayRecord(record: GameRecord): Game {
+  const tileSet = TILE_SETS[record.tileSet];
+  if (!tileSet) throw new Error(`Unknown tile set "${record.tileSet}" in record`);
+  const { game, apply } = build({ tileSet, opening: record.opening, seed: record.seed });
+  record.steps.forEach((step, i) => {
+    if (!apply(step)) throw new Error(`Record step ${i} (${step.type}) is not legal here`);
+  });
+  return game;
+}
+
+function build(options: GameOptions): { game: Game; apply: (step: RecordStep) => boolean } {
   const tileSet = options.tileSet ?? P2;
   const opening = options.opening ?? [{ kind: 'kite' as TileKind, origin: ORIGIN, dir: 0 }];
   const tiling = new Tiling(tileSet);
@@ -165,6 +195,7 @@ export function createGame(options: GameOptions = {}): Game {
   /** The pending tile is always the last tile of the tiling; `position` is where it was attached. */
   let pending: { id: number; position: Point } | null = null;
   let selected: TileKind | null = null;
+  const steps: RecordStep[] = [];
   let status: GameStatus = 'playing';
   /** Dead edges of the current tiling, recomputed lazily after each change. */
   let deadCache: { from: Point; to: Point }[] | null = null;
@@ -191,7 +222,66 @@ export function createGame(options: GameOptions = {}): Game {
       .map(({ p }) => p);
   };
 
-  return {
+  const place = (placement: Placement, position?: Point): boolean => {
+    if (status === 'over') return false;
+    if (!tileSet.kinds.includes(placement.kind) || !tiling.isLegal(placement)) return false;
+    const attached = placementVertices(tileSet, placement).filter((v) => tiling.vertex(pointKey(v)));
+    const anchor = (position && attached.find((v) => pointKey(v) === pointKey(position))) ?? attached[0]!;
+    if (deadEdges().length > 0) {
+      // confirm the pending tile; the confirmed tiling has a dead end, so the game ends here
+      // (the step is recorded so a replay ends the same way; the new tile itself is not added)
+      pending = null;
+      status = 'over';
+      steps.push({ type: 'place', placement: { ...placement, dir: mod10(placement.dir) }, position: anchor });
+      emit({ type: 'tiling-changed' });
+      emit({ type: 'game-over' });
+      return true;
+    }
+    pending = { id: tiling.add(placement).id, position: anchor };
+    steps.push({ type: 'place', placement: tiling.tiles[pending.id]!.placement, position: anchor });
+    emit({ type: 'tiling-changed' });
+    return true;
+  };
+
+  /** Turns the pending tile to `choose(current, legal orientations)`; false (no change) if that is not another legal one. */
+  const turnTo = (choose: (current: Placement, options: Placement[]) => Placement | undefined): boolean => {
+    if (pending === null) return false;
+    const current = tiling.removeLast()!.placement;
+    const options = orientationsAt(pending.position, current.kind);
+    const wanted = choose(current, options);
+    const ok =
+      wanted !== undefined &&
+      placementKey(wanted) !== placementKey(current) &&
+      options.some((o) => placementKey(o) === placementKey(wanted));
+    const next = ok ? wanted : current;
+    pending = { ...pending, id: tiling.add(next).id };
+    if (!ok) return false;
+    steps.push({ type: 'turn', placement: tiling.tiles[pending.id]!.placement });
+    emit({ type: 'tiling-changed' });
+    return true;
+  };
+
+  const removePending = (): boolean => {
+    if (pending === null) return false;
+    tiling.removeLast();
+    pending = null;
+    steps.push({ type: 'remove' });
+    emit({ type: 'tiling-changed' });
+    return true;
+  };
+
+  const apply = (step: RecordStep): boolean => {
+    switch (step.type) {
+      case 'place':
+        return place(step.placement, step.position);
+      case 'turn':
+        return turnTo(() => step.placement);
+      case 'remove':
+        return removePending();
+    }
+  };
+
+  const game: Game = {
     tileSet,
     tiles: () => tiling.tiles.map((t) => toPlaced(t.id)),
     confirmedTiles: () => tiling.tiles.filter((t) => t.id !== pending?.id).map((t) => toPlaced(t.id)),
@@ -243,6 +333,12 @@ export function createGame(options: GameOptions = {}): Game {
       const area = confirmed.reduce((s, t) => s + shapeOf(tileSet, t.placement.kind).area, 0);
       return { tiles: confirmed.length, area };
     },
+    record: () => ({
+      tileSet: tileSet.id,
+      ...(options.seed === undefined ? {} : { seed: options.seed }),
+      opening: opening.map((p) => ({ ...p })),
+      steps: [...steps],
+    }),
 
     select(kind) {
       if (kind !== null && !tileSet.kinds.includes(kind)) {
@@ -253,49 +349,22 @@ export function createGame(options: GameOptions = {}): Game {
       emit({ type: 'selection-changed' });
     },
 
-    place(placement, position) {
-      if (status === 'over') return false;
-      if (!tileSet.kinds.includes(placement.kind) || !tiling.isLegal(placement)) return false;
-      if (deadEdges().length > 0) {
-        // confirm the pending tile; the confirmed tiling has a dead end, so the game ends here
-        pending = null;
-        status = 'over';
-        emit({ type: 'tiling-changed' });
-        emit({ type: 'game-over' });
-        return true;
-      }
-      const attached = placementVertices(tileSet, placement).filter((v) => tiling.vertex(pointKey(v)));
-      const anchor =
-        (position && attached.find((v) => pointKey(v) === pointKey(position))) ?? attached[0]!;
-      pending = { id: tiling.add(placement).id, position: anchor };
-      emit({ type: 'tiling-changed' });
-      return true;
-    },
+    place,
 
     turnPending(step = 1) {
-      if (pending === null) return false;
-      const current = tiling.removeLast()!.placement;
-      const options = orientationsAt(pending.position, current.kind);
-      const i = options.findIndex((o) => placementKey(o) === placementKey(current));
-      const n = options.length;
-      const next = n > 1 && i >= 0 ? options[(((i + step) % n) + n) % n]! : current;
-      pending = { ...pending, id: tiling.add(next).id };
-      if (placementKey(next) === placementKey(current)) return false;
-      emit({ type: 'tiling-changed' });
-      return true;
+      return turnTo((current, options) => {
+        const i = options.findIndex((o) => placementKey(o) === placementKey(current));
+        const n = options.length;
+        return n > 1 && i >= 0 ? options[(((i + step) % n) + n) % n] : undefined;
+      });
     },
 
-    removePending() {
-      if (pending === null) return false;
-      tiling.removeLast();
-      pending = null;
-      emit({ type: 'tiling-changed' });
-      return true;
-    },
+    removePending,
 
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
   };
+  return { game, apply };
 }

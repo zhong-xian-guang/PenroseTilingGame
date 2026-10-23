@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { createGame, ORIGIN, pointKey, zphi, type Game, type GameEvent, type Placement, type Point } from '../../src/engine';
+import {
+  createGame,
+  decodeRecord,
+  encodeRecord,
+  ORIGIN,
+  pointKey,
+  replayRecord,
+  zphi,
+  type Game,
+  type GameEvent,
+  type Placement,
+  type Point,
+} from '../../src/engine';
 
 const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${((p.dir % 10) + 10) % 10}`;
 
@@ -100,6 +112,17 @@ describe('visible dead ends', () => {
     expect(game.deadEnds().length).toBeGreaterThan(0);
     expect(game.deadEnds().every((d) => d.cause === 'confirmed')).toBe(true);
     expect(game.score()).toEqual({ tiles: 3, area: expect.closeTo(2 * KITE_AREA + DART_AREA, 12) });
+  });
+
+  it('replaying the record of a finished game ends it the same way', () => {
+    const game = createGame();
+    game.place(secondKite);
+    game.place(fatalDart);
+    placeElsewhere(game);
+    const replayed = replayRecord(decodeRecord(encodeRecord(game.record())));
+    expect(replayed.status()).toBe('over');
+    expect(replayed.tiles().map(keyOf)).toEqual(game.tiles().map(keyOf));
+    expect(replayed.score()).toEqual(game.score());
   });
 
   it('once the game is over every placing command is refused', () => {
