@@ -206,7 +206,8 @@ export class Board {
       !!this.pointer &&
       !this.press?.dragging &&
       insidePolygon(this.camera.toWorld(this.pointer), pending.vertices.map(toXY));
-    if (!kind || !this.pointer || this.press?.dragging || this.overPending) {
+    const over = this.game.status() === 'over';
+    if (!kind || over || !this.pointer || this.press?.dragging || this.overPending) {
       this.hover = null;
     } else {
       const world = this.camera.toWorld(this.pointer);

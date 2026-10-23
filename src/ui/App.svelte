@@ -1,45 +1,62 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, ORIGIN, toXY, type TileKind } from '../engine';
+  import { createGame, ORIGIN, toXY, type Game, type Score, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE } from '../board/renderer';
   import Tray from './Tray.svelte';
+  import GameOverDialog from './GameOverDialog.svelte';
 
-  const game = createGame();
+  // A new game swaps the whole engine instance (and its board); the tile set stays the same.
+  const session: { game: Game } = { game: createGame() };
+  const tileSet = session.game.tileSet;
 
   // Engine state mirrored into Svelte via $state; refreshed from engine events.
-  let selected = $state<TileKind | null>(game.selectedKind());
-  let tileCount = $state(game.tiles().length);
-  let area = $state(0);
+  let selected = $state<TileKind | null>(session.game.selectedKind());
+  let score = $state<Score>(session.game.score());
+  let over = $state(session.game.status() === 'over');
 
   const recompute = () => {
-    selected = game.selectedKind();
-    const tiles = game.tiles();
-    tileCount = tiles.length;
-    area = tiles.reduce((s, t) => s + game.tileSet.shapes[t.kind]!.area, 0);
+    selected = session.game.selectedKind();
+    score = session.game.score();
+    over = session.game.status() === 'over';
   };
   recompute();
 
   let canvas: HTMLCanvasElement;
   let board: Board | null = null;
+  let stop: (() => void) | null = null;
 
-  onMount(() => {
-    board = new Board(canvas, game);
-    const off = game.subscribe((e) => {
+  const start = () => {
+    board = new Board(canvas, session.game);
+    const off = session.game.subscribe((e) => {
       recompute();
       if (e.type === 'selection-changed') board?.refresh();
     });
-    return () => {
+    stop = () => {
       off();
       board?.destroy();
       board = null;
     };
+  };
+
+  const newGame = () => {
+    const kind = session.game.selectedKind();
+    stop?.();
+    session.game = createGame();
+    session.game.select(kind);
+    recompute();
+    start();
+  };
+
+  onMount(() => {
+    start();
+    return () => stop?.();
   });
 
   /** Tray icons: each tile kind normalised into a 0–1 box, y flipped for SVG. */
   const icons = Object.fromEntries(
-    game.tileSet.kinds.map((kind) => {
-      const pts = game.verticesOf({ kind, origin: ORIGIN, dir: 2 }).map(toXY);
+    tileSet.kinds.map((kind) => {
+      const pts = session.game.verticesOf({ kind, origin: ORIGIN, dir: 2 }).map(toXY);
       const minX = Math.min(...pts.map((p) => p.x));
       const maxX = Math.max(...pts.map((p) => p.x));
       const minY = Math.min(...pts.map((p) => p.y));
@@ -57,8 +74,8 @@
   <canvas bind:this={canvas} aria-label="盤面"></canvas>
 
   <header class="hud">
-    <div><span class="label">片數</span> <strong>{tileCount}</strong></div>
-    <div><span class="label">面積</span> <strong>{area.toFixed(2)}</strong></div>
+    <div><span class="label">片數</span> <strong>{score.tiles}</strong></div>
+    <div><span class="label">面積</span> <strong>{score.area.toFixed(2)}</strong></div>
   </header>
 
   <div class="zoom">
@@ -76,14 +93,16 @@
       {/if}
     </p>
     <Tray
-      kinds={game.tileSet.kinds}
+      kinds={tileSet.kinds}
       {selected}
       colors={DEFAULT_PALETTE.tiles}
       {icons}
       {labels}
-      onselect={(kind) => game.select(kind)}
+      onselect={(kind) => session.game.select(kind)}
     />
   </footer>
+
+  <GameOverDialog open={over} {score} onnewgame={newGame} />
 </main>
 
 <style>

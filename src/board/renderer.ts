@@ -13,6 +13,8 @@ export interface Palette {
   arcB: string;
   /** Outline of the pending tile (the one still adjustable). */
   pending: string;
+  /** Marks a visible dead end (a boundary edge nothing fits onto). */
+  deadEnd: string;
 }
 
 export const DEFAULT_PALETTE: Palette = {
@@ -22,6 +24,7 @@ export const DEFAULT_PALETTE: Palette = {
   arcA: '#8a3b2a',
   arcB: '#1f4f7a',
   pending: '#d1495b',
+  deadEnd: '#e03131',
 };
 
 export interface Preview {
@@ -66,6 +69,8 @@ export function drawBoard(
     ctx.restore();
   }
 
+  drawDeadEnds(ctx, game, camera, palette);
+
   if (scene.preview) {
     const pts = game.verticesOf(scene.preview.placement).map(toXY);
     ctx.save();
@@ -83,6 +88,37 @@ export function drawBoard(
     ctx.fillStyle = palette.outline;
     ctx.fill();
   }
+}
+
+/** Visible dead ends: a translucent red pocket just outside each dead edge, and the edge itself in red. */
+function drawDeadEnds(ctx: CanvasRenderingContext2D, game: Game, camera: Camera, palette: Palette): void {
+  const dead = game.deadEnds();
+  if (!dead.length) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const { from, to } of dead) {
+    const a = toXY(from);
+    const b = toXY(to);
+    // the tile lies to the left of from → to (counter-clockwise), so the empty side is to the right
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = { x: (b.y - a.y) / len, y: -(b.x - a.x) / len };
+    const depth = 0.35 * len;
+    const mid = { x: (a.x + b.x) / 2 + n.x * depth, y: (a.y + b.y) / 2 + n.y * depth };
+    tracePolygon(ctx, camera, [a, b, mid]);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = palette.deadEnd;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    const sa = camera.toScreen(a);
+    const sb = camera.toScreen(b);
+    ctx.beginPath();
+    ctx.moveTo(sa.x, sa.y);
+    ctx.lineTo(sb.x, sb.y);
+    ctx.lineWidth = Math.max(3, camera.scale * 0.09);
+    ctx.strokeStyle = palette.deadEnd;
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function tracePolygon(ctx: CanvasRenderingContext2D, camera: Camera, pts: XY[]): void {
