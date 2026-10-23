@@ -2,7 +2,9 @@
   import { onMount } from 'svelte';
   import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type Score, type TileKind } from '../engine';
   import { Board } from '../board/board';
-  import { DEFAULT_PALETTE } from '../board/renderer';
+  import { DEFAULT_PALETTE, type Palette } from '../board/renderer';
+  import { derivePalette } from '../settings/palette';
+  import { displaySettings } from '../settings/store.svelte';
   import { Autosave } from '../storage/autosave';
   import Tray from './Tray.svelte';
   import Menu from './Menu.svelte';
@@ -40,6 +42,19 @@
 
   let offGame: (() => void) | null = null;
 
+  // Display settings (colours, Conway arcs) → board palette; derived colours override the defaults.
+  const palette = $derived<Palette>({ ...DEFAULT_PALETTE, ...derivePalette(displaySettings.value.colors) });
+  const applySettings = () => {
+    // read the reactive values before the guard, so the $effect below always tracks them
+    const next = palette;
+    const showArcs = displaySettings.value.showArcs;
+    if (!board) return;
+    board.palette = next;
+    board.showArcs = showArcs;
+    board.requestDraw();
+  };
+  $effect(applySettings);
+
   /** (Re)attach the board to the current game; the board centres and zooms on the opening patch. */
   const attach = () => {
     offGame?.();
@@ -48,6 +63,7 @@
     board.trayElement = trayZone;
     removing = false;
     board.onTrayDropTarget = (r) => (removing = r);
+    applySettings();
     offGame = game.subscribe((e) => {
       recompute();
       if (e.type === 'selection-changed') board?.refresh();
@@ -66,6 +82,7 @@
 
   onMount(() => {
     attach();
+    void displaySettings.load();
     let alive = true;
     void (async () => {
       const store = await Autosave.open();
@@ -145,7 +162,7 @@
       <Tray
         kinds={P2.kinds}
         {selected}
-        colors={DEFAULT_PALETTE.tiles}
+        colors={palette.tiles}
         {icons}
         {labels}
         {removing}
