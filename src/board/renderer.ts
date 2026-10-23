@@ -18,6 +18,8 @@ export interface Palette {
   deadEnd: string;
   /** The growth circle (only the boundary inside it takes new tiles); drawn faintly. */
   growthCircle: string;
+  /** The flow-mode recommended spot. */
+  flowSpot: string;
 }
 
 export const DEFAULT_PALETTE: Palette = {
@@ -29,6 +31,7 @@ export const DEFAULT_PALETTE: Palette = {
   pending: '#d1495b',
   deadEnd: '#e03131',
   growthCircle: 'rgba(43, 52, 64, 0.35)',
+  flowSpot: '#2f6fde',
 };
 
 /** What the renderer reads: a live Game, or a frozen replay frame (ReplayFrame). */
@@ -60,6 +63,8 @@ export interface Scene {
   layer?: TileLayer | null;
   /** Frame time (ms, e.g. performance.now()); the layer uses it to tell when the zoom has settled. */
   now?: number;
+  /** The flow-mode recommended spot (a point of the tiling), marked with a ring. */
+  flowSpot?: Point | null;
 }
 
 export function drawBoard(
@@ -141,6 +146,22 @@ export function drawBoard(
   }
 
   drawDeadEnds(ctx, game, camera, palette);
+
+  if (scene.flowSpot) {
+    // the recommended spot: a ring around a dot, sized in screen pixels so it reads at any zoom
+    const s = camera.toScreen(toXY(scene.flowSpot));
+    ctx.save();
+    ctx.strokeStyle = palette.flowSpot;
+    ctx.fillStyle = palette.flowSpot;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, Math.max(9, camera.scale * 0.22), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   if (scene.preview) {
     const pts = game.verticesOf(scene.preview.placement).map(toXY);

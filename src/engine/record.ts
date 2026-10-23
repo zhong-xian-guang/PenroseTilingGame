@@ -25,7 +25,7 @@ export type PlayMode = 'free' | 'flow';
 export type RecordStep =
   /**
    * A tile put down at `position` (the tiling point it was attached at); it becomes the pending tile.
-   * `mode` is missing until ticket 08 records it; missing means 'free'.
+   * `mode` is the play mode it was placed in; records from before ticket 08 lack it, and missing means 'free'.
    */
   | { readonly type: 'place'; readonly placement: Placement; readonly position: Point; readonly mode?: PlayMode }
   /** The pending tile turned to `placement`. */
@@ -44,7 +44,7 @@ export interface GameRecord {
 // ---- encoded form (version 1) ----
 type EncPoint = [number, number, number, number];
 type EncPlacement = [string, number, number, number, number, number];
-type EncStep = { op: 'place'; tile: EncPlacement; at: EncPoint } | { op: 'turn'; tile: EncPlacement } | { op: 'remove' };
+type EncStep = { op: 'place'; tile: EncPlacement; at: EncPoint; mode?: PlayMode } | { op: 'turn'; tile: EncPlacement } | { op: 'remove' };
 interface EncRecord {
   version: number;
   tileSet: string;
@@ -66,7 +66,12 @@ export function encodeRecord(record: GameRecord): string {
     steps: record.steps.map((s): EncStep => {
       switch (s.type) {
         case 'place':
-          return { op: 'place', tile: encPlacement(s.placement), at: encPoint(s.position) };
+          return {
+            op: 'place',
+            tile: encPlacement(s.placement),
+            at: encPoint(s.position),
+            ...(s.mode === undefined ? {} : { mode: s.mode }),
+          };
         case 'turn':
           return { op: 'turn', tile: encPlacement(s.placement) };
         case 'remove':
@@ -104,8 +109,16 @@ const decPlacement = (x: unknown): Placement => {
 const decStep = (x: unknown): RecordStep => {
   const s = (x ?? {}) as Partial<Record<string, unknown>>;
   switch (s.op) {
-    case 'place':
-      return { type: 'place', placement: decPlacement(s.tile), position: decPoint(s.at) };
+    case 'place': {
+      if (s.mode !== undefined && s.mode !== 'free' && s.mode !== 'flow') fail(`Bad mode in record: ${JSON.stringify(x)}`);
+      const mode = s.mode as PlayMode | undefined;
+      return {
+        type: 'place',
+        placement: decPlacement(s.tile),
+        position: decPoint(s.at),
+        ...(mode === undefined ? {} : { mode }),
+      };
+    }
     case 'turn':
       return { type: 'turn', placement: decPlacement(s.tile) };
     case 'remove':

@@ -15,3 +15,19 @@ export const GROWTH_MARGIN = 1.5;
  * along a worm). Larger = finds doom further away, slower analysis.
  */
 export const BACKTRACE_MAX_FORCED = 60;
+
+/**
+ * Flow mode: how far from the last tile (centre to point, in length units) a
+ * spot still counts as "nearby". Nearby spots are ranked by how constrained
+ * they are; only when none is nearby does the recommendation jump to the
+ * nearest spot. Larger = more jumping to tight spots; smaller = steadier path.
+ */
+export const FLOW_NEAR_RADIUS = 2;
+
+/**
+ * Flow mode camera (presentation, kept here with the other tunables): the view
+ * pans, smoothly, to centre the recommended spot only once it comes within
+ * this fraction of the smaller viewport side of the edge (or leaves the view).
+ * Larger = pans earlier and more often; smaller = steadier view.
+ */
+export const FLOW_PAN_MARGIN = 0.18;

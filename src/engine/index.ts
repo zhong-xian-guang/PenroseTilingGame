@@ -12,6 +12,7 @@ export { encodeRecord, decodeRecord, RecordFormatError, RECORD_VERSION } from '.
 export type { GameRecord, PlayMode, RecordStep } from './record';
 export type {
   DeadEnd,
+  FlowSpot,
   Game,
   GameEvent,
   GameOptions,
@@ -22,7 +23,7 @@ export type {
   Score,
   VertexInfo,
 } from './game';
-export { GROWTH_MARGIN } from './tuning';
+export { FLOW_NEAR_RADIUS, FLOW_PAN_MARGIN, GROWTH_MARGIN } from './tuning';
 export type { Placement } from './geometry';
 export { openingPatch, OPENING_MIN_TILES, OPENING_MAX_TILES } from './opening';
 export { P2 } from './p2';
