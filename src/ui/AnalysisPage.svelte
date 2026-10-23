@@ -8,14 +8,41 @@
   import type { Palette } from '../board/renderer';
   import { t } from '../i18n/index.svelte';
   import Replay from './Replay.svelte';
+  import { deliverRecord } from '../share/deliver';
 
   let {
     open,
     record,
+    shared = false,
     palette,
     showArcs,
     onback,
-  }: { open: boolean; record: GameRecord | null; palette?: Palette; showArcs?: boolean; onback: () => void } = $props();
+  }: {
+    open: boolean;
+    record: GameRecord | null;
+    /** The record came from someone else (ticket 11): a share link or an imported file. */
+    shared?: boolean;
+    palette?: Palette;
+    showArcs?: boolean;
+    onback: () => void;
+  } = $props();
+
+  /** Outcome of the last "Share record" press, shown next to the button. */
+  let shareStatus = $state<'copied' | 'file' | 'failed' | null>(null);
+  $effect(() => {
+    void record;
+    shareStatus = null;
+  });
+  const share = async () => {
+    if (!record) return;
+    shareStatus = null;
+    try {
+      const outcome = await deliverRecord(record);
+      if (outcome === 'copied' || outcome === 'file') shareStatus = outcome;
+    } catch {
+      shareStatus = 'failed';
+    }
+  };
 
   let dialog: HTMLDialogElement;
 
@@ -47,7 +74,16 @@
   <header>
     <button type="button" class="back" onclick={onback}>{t('analysis.back')}</button>
     <h2 id="analysis-title">{t('analysis.title')}</h2>
+    <button type="button" class="back share" onclick={share} disabled={!record}>{t('share.button')}</button>
   </header>
+  {#if shareStatus}
+    <p class="note" role="status">
+      {shareStatus === 'copied' ? t('share.copied') : shareStatus === 'file' ? t('share.file') : t('share.failed')}
+    </p>
+  {/if}
+  {#if shared}
+    <p class="note">{t('share.viewing')}</p>
+  {/if}
 
   {#if stats}
     <section>
@@ -170,6 +206,14 @@
     font: inherit;
     font-size: 14px;
     cursor: pointer;
+  }
+  .share {
+    margin-left: auto;
+  }
+  .note {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--muted);
   }
   section {
     margin-top: 16px;
