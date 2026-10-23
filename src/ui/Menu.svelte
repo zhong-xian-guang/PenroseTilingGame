@@ -3,7 +3,11 @@
   import oflText from '../fonts/OFL.txt?raw';
   import SettingsDialog from './SettingsDialog.svelte';
 
+  /** A record file picked through "Open record" (ticket 11). */
+  let { onimport }: { onimport?: (file: File) => void } = $props();
+
   let about: HTMLDialogElement;
+  let fileInput: HTMLInputElement;
 </script>
 
 <nav class="menu">
@@ -11,6 +15,18 @@
     {t('language.other')}
   </button>
   <SettingsDialog />
+  <button type="button" onclick={() => fileInput.click()}>{t('share.open')}</button>
+  <input
+    bind:this={fileInput}
+    type="file"
+    accept=".json,application/json"
+    hidden
+    onchange={() => {
+      const file = fileInput.files?.[0];
+      fileInput.value = '';
+      if (file) onimport?.(file);
+    }}
+  />
   <button type="button" onclick={() => about.showModal()}>{t('about.open')}</button>
 </nav>
 

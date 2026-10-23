@@ -62,5 +62,15 @@
   "analysis.play": "播放",
   "analysis.pause": "暫停",
   "analysis.seek": "重播進度",
-  "analysis.step": "第 {n} / {total} 步"
+  "analysis.step": "第 {n} / {total} 步",
+  "share.button": "分享棋譜",
+  "share.copied": "已複製分享連結",
+  "share.file": "棋譜太長，放不進連結，已改存成檔案",
+  "share.failed": "無法分享這份棋譜",
+  "share.viewing": "這是分享來的棋譜，不會影響你自己進行中的局與個人最佳。",
+  "share.open": "開啟棋譜",
+  "share.error.title": "無法開啟這份棋譜",
+  "share.error.version": "這份棋譜來自不同版本的遊戲（棋譜格式 {version}，目前的版本只能讀取格式 {expected}）。",
+  "share.error.malformed": "這個連結或檔案不是有效的棋譜。",
+  "share.error.close": "確定"
 }
