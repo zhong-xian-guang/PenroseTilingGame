@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check && vite build",
+    "build": "npm run fonts && npm run check && vite build",
+    "fonts": "node scripts/build-fonts.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

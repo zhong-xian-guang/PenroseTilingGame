@@ -7,7 +7,9 @@
   --kite: #7fa6d6;
   --dart: #ecbc74;
   color-scheme: light;
-  font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', sans-serif;
+  /* PTG Sans (Latin) and PTG Sans TC (Chinese): subset, renamed LINE Seed, see src/fonts/.
+     Their unicode-ranges do not overlap, so the browser picks per character. */
+  font-family: 'PTG Sans', 'PTG Sans TC', system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', sans-serif;
 }
 
 * {
