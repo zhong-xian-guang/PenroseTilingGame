@@ -2,9 +2,10 @@
   /**
    * Analysis page (ticket 09), opened from the game-over summary's "Details":
    * usage statistics, shape completeness, free/flow share and a replay, all
-   * computed from the game record (engine `analyzeRecord` / `replayFrames`).
+   * computed from the game record (engine `analyzeRecord` / `replayFrames`),
+   * and the mistake backtrace (ticket 10, computed in the background by App).
    */
-  import { analyzeRecord, replayFrames, type GameRecord } from '../engine';
+  import { analyzeRecord, replayFrames, type Backtrace, type GameRecord } from '../engine';
   import type { Palette } from '../board/renderer';
   import { t } from '../i18n/index.svelte';
   import Replay from './Replay.svelte';
@@ -13,6 +14,7 @@
   let {
     open,
     record,
+    backtrace,
     shared = false,
     palette,
     showArcs,
@@ -20,6 +22,8 @@
   }: {
     open: boolean;
     record: GameRecord | null;
+    /** Undefined while it runs, null when unavailable. */
+    backtrace: Backtrace | null | undefined;
     /** The record came from someone else (ticket 11): a share link or an imported file. */
     shared?: boolean;
     palette?: Palette;
@@ -27,6 +31,8 @@
     onback: () => void;
   } = $props();
 
+  /** The replay's current frame (bound to Replay, so "go to step N" can seek). */
+  let replayIndex = $state(0);
   /** Outcome of the last "Share record" press, shown next to the button. */
   let shareStatus = $state<'copied' | 'file' | 'failed' | null>(null);
   $effect(() => {
@@ -157,15 +163,37 @@
       <p class="modes">{t('analysis.modesValue', { free: freePct, flow: 100 - freePct })}</p>
     </section>
 
-    <!--
-      Ticket 10 (mistake backtrace) goes here: "doomed since step N" plus markers
-      on the replay (the doomed step and the final dead end). Replay.svelte would
-      take the step index to highlight / seek to.
-    -->
+    <!-- a game that is not over (e.g. a shared record of one in progress) has nothing to trace back -->
+    {#if backtrace?.doomedAt !== null}
+    <section>
+      <h3>{t('analysis.backtrace')}</h3>
+      {#if backtrace === undefined}
+        <p class="muted">{t('analysis.backtracePending')}</p>
+      {:else if backtrace === null}
+        <p class="muted">{t('analysis.backtraceUnavailable')}</p>
+      {:else}
+        {@const n = backtrace.doomedAt ?? 0}
+        <div class="doomed">
+          <p><strong>{t('analysis.backtraceValue', { n })}</strong></p>
+          <button type="button" class="jump" onclick={() => (replayIndex = n)}>
+            {t('analysis.backtraceJump', { n })}
+          </button>
+        </div>
+        <p class="hint">{t('analysis.backtraceHint')}</p>
+      {/if}
+    </section>
+    {/if}
 
     <section>
       <h3>{t('analysis.replay')}</h3>
-      <Replay {frames} {palette} {showArcs} />
+      <Replay
+        {frames}
+        {palette}
+        {showArcs}
+        bind:index={replayIndex}
+        doomedStep={backtrace?.doomedAt ?? null}
+        finalDeadEnds={backtrace?.deadEnds ?? []}
+      />
     </section>
   {/if}
 </dialog>
@@ -264,6 +292,33 @@
     font-size: 12px;
     line-height: 1.5;
     color: var(--muted);
+  }
+  .muted {
+    margin: 0;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .doomed {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .doomed p {
+    margin: 0;
+    font-size: 15px;
+  }
+  .jump {
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 10px;
+    background: var(--ink);
+    color: var(--panel);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
   }
   .modes {
     margin: 0;

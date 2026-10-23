@@ -60,6 +60,13 @@ export interface TileRecord {
   readonly center: { x: number; y: number };
   /** Floating-point bounding box (culling only). */
   readonly box: Box;
+  /** Floating-point corner positions (culling only). */
+  readonly xy: readonly XY[];
+}
+
+interface XY {
+  readonly x: number;
+  readonly y: number;
 }
 
 interface Box {
@@ -102,7 +109,7 @@ interface VertexRecord {
   readonly corners: CornerAt[];
 }
 
-interface EdgeOwner {
+export interface EdgeOwner {
   readonly tileId: number;
   readonly edge: number;
 }
@@ -184,6 +191,7 @@ export class Tiling {
       keys,
       center: centerOf(vertices),
       box: boxOf(vertices),
+      xy: vertices.map(toXY),
     };
     this.records.push(rec);
     keys.forEach((k, i) => {
@@ -324,14 +332,17 @@ export class Tiling {
 
     const center = centerOf(vertices);
     const box = boxOf(vertices);
-    const ownTris = shape.triangles.map((t) => t.map((i) => vertices[i]!));
+    const xy = vertices.map(toXY);
     for (const other of this.tilesNear(center)) {
       if (Math.hypot(other.center.x - center.x, other.center.y - center.y) > NEAR_RADIUS) continue;
       if (boxesApart(box, other.box)) continue;
       const otherShape = shapeOf(ts, other.placement.kind);
-      const otherTris = otherShape.triangles.map((t) => t.map((i) => other.vertices[i]!));
-      for (const t1 of ownTris) for (const t2 of otherTris) if (trianglesOverlap(t1, t2)) return false;
-      if (hasTJunction(vertices, other.vertices)) return false;
+      for (const t1 of shape.triangles) {
+        for (const t2 of otherShape.triangles) {
+          if (trianglesOverlap(t1, vertices, xy, t2, other.vertices, other.xy)) return false;
+        }
+      }
+      if (hasTJunction(vertices, xy, other.vertices, other.xy)) return false;
     }
     return true;
   }
@@ -364,7 +375,7 @@ export class Tiling {
   }
 
   /** Every boundary edge as (edge key, tile, edge index). A boundary edge belongs to exactly one tile. */
-  private *boundaryEdges(): Generator<{ ek: string; tileId: number; edge: number }> {
+  *boundaryEdges(): Generator<{ ek: string; tileId: number; edge: number }> {
     if (this.boundaryUnordered) {
       const seq = (ek: string) => this.edgeSeq.get(ek)!;
       this.boundary = new Map([...this.boundary].sort(([a], [b]) => seq(a) - seq(b)));
@@ -436,6 +447,28 @@ export class Tiling {
   }
 
   /**
+   * The legal placements (any kind, any orientation) glued onto boundary edge
+   * `edge` of tile `tileId`, ignoring the growth region; stops after `limit`.
+   * Served from the per-edge cache.
+   */
+  fillers({ tileId, edge }: EdgeOwner, limit = Infinity): Placement[] {
+    const keys = this.records[tileId]!.keys;
+    const ek = edgeKey(keys[edge]!, keys[(edge + 1) % keys.length]!);
+    const out: Placement[] = [];
+    const seen = new Set<string>();
+    for (const options of this.edgeEntry(ek, tileId, edge).legal.values()) {
+      for (const o of options) {
+        if (out.length >= limit) return out;
+        const key = placementKey(o.placement);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(o.placement);
+      }
+    }
+    return out;
+  }
+
+  /**
    * All legal placements of `kind` glued onto a boundary edge inside the
    * growth region, each once: a placement glued onto several boundary edges
    * is listed at the first of them (in boundary order) inside the region.
@@ -466,9 +499,45 @@ export class Tiling {
   }
 }
 
-/** Exact separating-axis test: do the interiors of two counter-clockwise triangles intersect? */
-function trianglesOverlap(a: readonly Point[], b: readonly Point[]): boolean {
+/**
+ * Float margin for the pre-checks below. Coordinates of realistic boards are
+ * at most a few hundred with float error around 1e-13, so a float result
+ * this far from zero has the same sign as the exact one; anything closer
+ * goes to the exact test.
+ */
+const FLOAT_MARGIN = 1e-6;
+
+/** (q − p) × (r − p) in floating point. */
+const crossXY = (p: XY, q: XY, r: XY): number => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+
+/**
+ * Exact separating-axis test: do the interiors of two counter-clockwise
+ * triangles intersect? Triangles are given as corner indices into exact and
+ * float corner lists; a clear float separation skips the exact test.
+ */
+function trianglesOverlap(
+  ta: readonly number[],
+  va: readonly Point[],
+  xa: readonly XY[],
+  tb: readonly number[],
+  vb: readonly Point[],
+  xb: readonly XY[],
+): boolean {
+  if (clearlySeparated(ta, xa, tb, xb) || clearlySeparated(tb, xb, ta, xa)) return false;
+  const a = ta.map((i) => va[i]!);
+  const b = tb.map((i) => vb[i]!);
   return !separatedByEdge(a, b) && !separatedByEdge(b, a);
+}
+
+/** Does an edge of triangle `ta` have all of `tb` clearly on its outer side (float, with margin)? */
+function clearlySeparated(ta: readonly number[], xa: readonly XY[], tb: readonly number[], xb: readonly XY[]): boolean {
+  for (let i = 0; i < ta.length; i++) {
+    const p = xa[ta[i]!]!;
+    const q = xa[ta[(i + 1) % ta.length]!]!;
+    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    if (tb.every((k) => crossXY(p, q, xb[k]!) < -FLOAT_MARGIN * len)) return true;
+  }
+  return false;
 }
 
 function separatedByEdge(a: readonly Point[], b: readonly Point[]): boolean {
@@ -480,8 +549,23 @@ function separatedByEdge(a: readonly Point[], b: readonly Point[]): boolean {
   return false;
 }
 
-function hasTJunction(a: readonly Point[], b: readonly Point[]): boolean {
-  const check = (pts: readonly Point[], poly: readonly Point[]) =>
-    pts.some((p) => poly.some((s, i) => strictlyInsideSegment(p, s, poly[(i + 1) % poly.length]!)));
-  return check(a, b) || check(b, a);
+/** Does a corner of either polygon lie strictly inside an edge of the other? Exact, after a float pre-check. */
+function hasTJunction(a: readonly Point[], xa: readonly XY[], b: readonly Point[], xb: readonly XY[]): boolean {
+  const check = (pts: readonly Point[], xp: readonly XY[], poly: readonly Point[], xq: readonly XY[]) =>
+    pts.some((p, k) =>
+      poly.some((s, i) => {
+        const j = (i + 1) % poly.length;
+        if (clearlyOffSegment(xp[k]!, xq[i]!, xq[j]!)) return false;
+        return strictlyInsideSegment(p, s, poly[j]!);
+      }),
+    );
+  return check(a, xa, b, xb) || check(b, xb, a, xa);
+}
+
+/** Is `p` clearly (float, with margin) off segment a–b: away from its line, or beyond an end? */
+function clearlyOffSegment(p: XY, a: XY, b: XY): boolean {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (Math.abs(crossXY(a, b, p)) > FLOAT_MARGIN * len) return true;
+  const t = (p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y);
+  return t < -FLOAT_MARGIN * len || t > len * len + FLOAT_MARGIN * len;
 }

@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, openingPatch, ORIGIN, P2, RECORD_VERSION, toXY, type Game, type GameRecord, type Score, type TileKind } from '../engine';
+  import { createGame, openingPatch, ORIGIN, P2, RECORD_VERSION, toXY, type Backtrace, type Game, type GameRecord, type Score, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE, type Palette } from '../board/renderer';
   import { derivePalette } from '../settings/palette';
   import { displaySettings } from '../settings/store.svelte';
   import { Autosave } from '../storage/autosave';
   import { submitScore, type BestComparison } from '../storage/best';
+  import { backtraceInBackground } from './backtrace';
   import Tray from './Tray.svelte';
   import Menu from './Menu.svelte';
   import GameOverDialog from './GameOverDialog.svelte';
@@ -33,6 +34,22 @@
   /** The analysis page is open (in place of the summary); it shows `analysisRecord`. */
   let analysisOpen = $state(false);
   let analysisRecord = $state.raw<GameRecord | null>(null);
+  /** The record of the finished own game (fixed once it is over). */
+  let finishedRecord: GameRecord | null = null;
+  /**
+   * Mistake backtraces (ticket 10), computed in the background: of the finished own game (for the summary)
+   * and of the record on the analysis page. Undefined while running, null if unavailable.
+   */
+  let summaryBacktrace = $state.raw<Backtrace | null | undefined>(undefined);
+  let analysisBacktrace = $state.raw<Backtrace | null | undefined>(undefined);
+  $effect(() => {
+    const record = analysisRecord;
+    analysisBacktrace = undefined;
+    if (!record) return;
+    void backtraceInBackground(record).then((b) => {
+      if (analysisRecord === record) analysisBacktrace = b;
+    });
+  });
   /**
    * The analysis page shows someone else's record (share link or imported file, ticket 11). Such a record is
    * only replayed for viewing: the own game, its autosave and the personal best are never touched.
@@ -84,6 +101,12 @@
       void submitScore(finished.tileSet.id, finished.score()).then((c) => {
         if (game === finished) best = c;
       });
+      // the record of a finished game never changes: the summary and the analysis page share it (and its backtrace)
+      finishedRecord = finished.record();
+      summaryBacktrace = undefined;
+      void backtraceInBackground(finishedRecord).then((b) => {
+        if (game === finished) summaryBacktrace = b;
+      });
     }
   };
   recompute();
@@ -132,6 +155,7 @@
 
   const startNewGame = () => {
     analysisOpen = false;
+    finishedRecord = null;
     game = newGame();
     attach();
     void autosave?.track(game);
@@ -237,8 +261,9 @@
     open={over && !analysisOpen}
     {score}
     {best}
+    doomedAt={summaryBacktrace === undefined ? undefined : (summaryBacktrace?.doomedAt ?? null)}
     ondetails={() => {
-      analysisRecord = game.record();
+      analysisRecord = finishedRecord ?? game.record();
       analysisShared = false;
       analysisOpen = true;
     }}
@@ -247,6 +272,7 @@
   <AnalysisPage
     open={analysisOpen}
     record={analysisRecord}
+    backtrace={analysisBacktrace}
     shared={analysisShared}
     {palette}
     showArcs={displaySettings.value.showArcs}

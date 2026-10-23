@@ -6,6 +6,8 @@
 export { createGame, replayRecord } from './game';
 export { analyzeRecord, replayFrames } from './analysis';
 export type { GameStats, ReplayFrame } from './analysis';
+export { backtraceRecord } from './backtrace';
+export type { Backtrace } from './backtrace';
 export { encodeRecord, decodeRecord, RecordFormatError, RECORD_VERSION } from './record';
 export type { GameRecord, PlayMode, RecordStep } from './record';
 export type {
