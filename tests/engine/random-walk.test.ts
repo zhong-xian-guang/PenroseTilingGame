@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createGame, P2, type Placement } from '../../src/engine';
+import { createGame, P2, pointKey, type Placement } from '../../src/engine';
 import { hasTJunction, overlapArea, polygonOf, sharedEdgeCount } from './oracle';
 
 /** Small deterministic PRNG (mulberry32) so failures are reproducible. */
@@ -14,31 +14,47 @@ function rng(seed: number) {
   };
 }
 
-describe('random play keeps the tiling sound (checked by an independent float oracle)', () => {
-  it.each([1, 2, 3])('seed %i', (seed) => {
+const MAX_STEPS = 500;
+
+describe('random play until a dead end keeps the tiling sound (checked by an independent float oracle)', () => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])('seed %i', (seed) => {
     const random = rng(seed);
     const game = createGame();
-    for (let step = 0; step < 40; step++) {
-      const tiles = game.tiles();
+    let steps = 0;
+    while (game.status() === 'playing' && steps < MAX_STEPS) {
       const all: Placement[] = P2.kinds.flatMap((k) => [...game.candidates(k)]);
-      for (const c of all) {
-        const v = game.verticesOf(c);
-        const poly = polygonOf(v);
-        let shared = 0;
-        for (const t of tiles) {
-          expect(overlapArea(poly, polygonOf(t.vertices))).toBeLessThan(1e-9);
-          expect(hasTJunction(v, t.vertices)).toBe(false);
-          shared += sharedEdgeCount(v, t.vertices);
-        }
-        expect(shared).toBeGreaterThanOrEqual(1);
-      }
       if (all.length === 0) break;
-      expect(game.place(all[Math.floor(random() * all.length)]!)).toBe(true);
-      for (const t of game.tiles()) {
-        for (const p of t.vertices) {
-          const info = game.vertexAt(p)!;
-          if (info.complete) expect(info.configuration, JSON.stringify(info.corners)).not.toBeNull();
-        }
+      const pick = all[Math.floor(random() * all.length)]!;
+      const before = game.tiles();
+      expect(game.place(pick)).toBe(true);
+      steps++;
+      if (game.status() === 'over') break;
+      // the new tile overlaps nothing, makes no T-junction, and shares a whole edge
+      const v = game.verticesOf(pick);
+      const poly = polygonOf(v);
+      let shared = 0;
+      for (const t of before) {
+        expect(overlapArea(poly, polygonOf(t.vertices))).toBeLessThan(1e-9);
+        expect(hasTJunction(v, t.vertices)).toBe(false);
+        shared += sharedEdgeCount(v, t.vertices);
+      }
+      expect(shared).toBeGreaterThanOrEqual(1);
+    }
+    // random play does run into a dead end, and the game ends there
+    expect(game.status()).toBe('over');
+    expect(game.deadEnds().length).toBeGreaterThan(0);
+
+    const seen = new Set<string>();
+    for (const t of game.tiles()) {
+      for (const p of t.vertices) {
+        if (seen.has(pointKey(p))) continue;
+        seen.add(pointKey(p));
+        const info = game.vertexAt(p)!;
+        // matching rule: every corner on a point carries the same vertex label
+        const labels = new Set(info.corners.map((c) => P2.shapes[c.kind]!.corners[c.corner]!.label));
+        expect(labels.size, JSON.stringify(info.corners)).toBe(1);
+        // every interior vertex is one of the seven configurations
+        if (info.complete) expect(info.configuration, JSON.stringify(info.corners)).not.toBeNull();
       }
     }
   });

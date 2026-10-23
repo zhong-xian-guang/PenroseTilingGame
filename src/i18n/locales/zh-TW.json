@@ -21,5 +21,8 @@
   "about.fonts.title": "字型",
   "about.fonts.credit": "介面字型基於 LY Corporation 的 LINE Seed Sans 與 LINE Seed TW。本遊戲只保留介面用到的字元，並改名為 PTG Sans 與 PTG Sans TC，依 SIL Open Font License 1.1 授權散布。",
   "about.fonts.license": "SIL Open Font License 1.1 全文",
-  "about.close": "關閉"
+  "about.close": "關閉",
+  "gameOver.title": "遊戲結束",
+  "gameOver.reason": "鋪砌邊界出現了放不進任何拼塊的凹洞。",
+  "gameOver.areaUnit": "平方單位"
 }

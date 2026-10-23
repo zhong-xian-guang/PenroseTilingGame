@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type TileKind } from '../engine';
+  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type Score, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE } from '../board/renderer';
   import { Autosave } from '../storage/autosave';
   import Tray from './Tray.svelte';
   import Menu from './Menu.svelte';
+  import GameOverDialog from './GameOverDialog.svelte';
   import { t } from '../i18n/index.svelte';
 
   /** A fresh game starting from a random opening patch. */
@@ -19,14 +20,13 @@
 
   // Engine state mirrored into Svelte via $state; refreshed from engine events.
   let selected = $state<TileKind | null>(game.selectedKind());
-  let tileCount = $state(game.tiles().length);
-  let area = $state(0);
+  let score = $state<Score>(game.score());
+  let over = $state(game.status() === 'over');
 
   const recompute = () => {
     selected = game.selectedKind();
-    const tiles = game.tiles();
-    tileCount = tiles.length;
-    area = tiles.reduce((s, t) => s + game.tileSet.shapes[t.kind]!.area, 0);
+    score = game.score();
+    over = game.status() === 'over';
   };
   recompute();
 
@@ -111,8 +111,8 @@
   <canvas bind:this={canvas} aria-label={t('board.label')}></canvas>
 
   <header class="hud">
-    <div><span class="label">{t('hud.tiles')}</span> <strong>{tileCount}</strong></div>
-    <div><span class="label">{t('hud.area')}</span> <strong>{area.toFixed(2)}</strong></div>
+    <div><span class="label">{t('hud.tiles')}</span> <strong>{score.tiles}</strong></div>
+    <div><span class="label">{t('hud.area')}</span> <strong>{score.area.toFixed(2)}</strong></div>
   </header>
 
   <Menu />
@@ -154,6 +154,8 @@
       />
     </div>
   </footer>
+
+  <GameOverDialog open={over} {score} onnewgame={startNewGame} />
 </main>
 
 <style>

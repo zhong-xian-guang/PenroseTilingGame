@@ -21,5 +21,8 @@
   "about.fonts.title": "Fonts",
   "about.fonts.credit": "The interface fonts are based on LINE Seed Sans and LINE Seed TW by LY Corporation. This game keeps only the characters the interface uses and renames them PTG Sans and PTG Sans TC, distributed under the SIL Open Font License 1.1.",
   "about.fonts.license": "SIL Open Font License 1.1, full text",
-  "about.close": "Close"
+  "about.close": "Close",
+  "gameOver.title": "Game over",
+  "gameOver.reason": "The boundary has a gap that no tile can fill.",
+  "gameOver.areaUnit": "square units"
 }

@@ -175,6 +175,33 @@ export class Tiling {
     for (const owners of this.edgeMap.values()) if (owners.length === 1) yield owners[0]!;
   }
 
+  /**
+   * Boundary edges that no tile of any kind, in any orientation, can be
+   * legally glued onto. Legality only gets stricter as tiles are added, so
+   * such an edge can never be covered: a visible dead end.
+   */
+  deadEdges(): { from: Point; to: Point }[] {
+    const ts = this.tileSet;
+    const out: { from: Point; to: Point }[] = [];
+    for (const { tileId, edge } of this.boundaryEdges()) {
+      const owner = this.records[tileId]!;
+      const ownerEdge = shapeOf(ts, owner.placement.kind).edges[edge]!;
+      const from = owner.vertices[edge]!;
+      const to = owner.vertices[(edge + 1) % owner.vertices.length]!;
+      const reverseDir = edgeDirection(ts, owner.placement, edge) + 5;
+      const fillable = ts.kinds.some((kind) =>
+        shapeOf(ts, kind).edges.some(
+          (e, j) =>
+            eq(e.length, ownerEdge.length) &&
+            ts.edgesMatch(e.label, ownerEdge.label) &&
+            this.isLegal(placementOnSegment(ts, kind, j, to, reverseDir)),
+        ),
+      );
+      if (!fillable) out.push({ from, to });
+    }
+    return out;
+  }
+
   /** All legal placements of `kind` (each shares at least one whole edge with the tiling). */
   candidates(kind: TileKind): readonly Placement[] {
     const cached = this.candidateCache.get(kind);

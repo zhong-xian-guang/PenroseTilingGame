@@ -258,7 +258,7 @@ export class Board {
     const follow = (ev: PointerEvent) => {
       drag.finger = this.local(ev);
       drag.overTray = this.overTray(ev);
-      const pick = drag.overTray ? null : this.game.pickNear(this.camera.toWorld(aimOf(drag.finger)), kind);
+      const pick = drag.overTray || this.game.status() === 'over' ? null : this.game.pickNear(this.camera.toWorld(aimOf(drag.finger)), kind);
       drag.hover = pick ? { pick, index: Math.max(0, pick.index) } : null;
       this.requestDraw();
     };
@@ -391,7 +391,8 @@ export class Board {
       !!this.pointer &&
       !this.press?.dragging &&
       insidePolygon(this.camera.toWorld(this.pointer), pending.vertices.map(toXY));
-    if (!kind || !this.pointer || this.press?.dragging || this.overPending) {
+    const over = this.game.status() === 'over';
+    if (!kind || over || !this.pointer || this.press?.dragging || this.overPending) {
       this.hover = null;
     } else {
       const world = this.camera.toWorld(this.pointer);

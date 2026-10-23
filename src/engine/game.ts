@@ -4,7 +4,7 @@
  */
 import { edgeDirection, placementVertices, type Placement } from './geometry';
 import { P2 } from './p2';
-import { DIRECTIONS, ORIGIN, pointKey, toXY, type Point } from './point';
+import { DIRECTIONS, mod10, ORIGIN, pointKey, toXY, type Point } from './point';
 import type { GameRecord, RecordStep } from './record';
 import { centerOf, placementKey, Tiling } from './tiling';
 import { shapeOf, type CornerRef, type TileKind, type TileSet } from './tileset';
@@ -55,6 +55,18 @@ export interface Game {
   vertexAt(point: Point): VertexInfo | null;
   /** The tile kind currently picked in the tray, if any. */
   selectedKind(): TileKind | null;
+  /** 'playing' until a visible dead end is confirmed, then 'over' for good. */
+  status(): GameStatus;
+  /**
+   * The visible dead ends on the board: boundary edges that no tile of any
+   * kind, in any orientation, can be glued onto. While playing they can only
+   * come from the pending tile (cause 'pending': mark them, the player may
+   * still turn or remove it); once the game is over they are the confirmed
+   * dead ends that ended it (cause 'confirmed').
+   */
+  deadEnds(): readonly DeadEnd[];
+  /** Score of the confirmed tiling: its tile count and total area in squared length units. */
+  score(): Score;
   /**
    * The game record so far: tile set, opening, and every step that changed
    * the board (places, turns and removals of the pending tile), in order.
@@ -74,6 +86,11 @@ export interface Game {
    * `orientationsAt` / `pickNear`); turning the pending tile cycles through
    * the legal orientations there. When omitted or not a corner of the tile on
    * the tiling, the first such corner (in corner order) is used.
+   *
+   * If the board already shows a visible dead end (left by the pending
+   * tile), putting the next tile down confirms the pending tile and ends the
+   * game instead: the new tile is not added and does not score. That also
+   * returns true; check `status()`. Once the game is over it returns false.
    */
   place(placement: Placement, position?: Point): boolean;
   /**
@@ -108,7 +125,26 @@ export interface VertexInfo {
   readonly configuration: string | null;
 }
 
-export type GameEvent = { readonly type: 'tiling-changed' } | { readonly type: 'selection-changed' };
+export type GameStatus = 'playing' | 'over';
+
+export interface DeadEnd {
+  /** The boundary edge nothing can be glued onto (exact endpoints, counter-clockwise along its tile). */
+  readonly from: Point;
+  readonly to: Point;
+  /** 'pending': caused by the pending tile, game still on. 'confirmed': in the confirmed tiling, game over. */
+  readonly cause: 'pending' | 'confirmed';
+}
+
+export interface Score {
+  readonly tiles: number;
+  /** Total area in squared length units (shortest edge = 1). */
+  readonly area: number;
+}
+
+export type GameEvent =
+  | { readonly type: 'tiling-changed' }
+  | { readonly type: 'selection-changed' }
+  | { readonly type: 'game-over' };
 
 /** Name of the atlas entry equal to `corners` up to cyclic rotation, if any. */
 function classify(tileSet: TileSet, corners: readonly CornerRef[]): string | null {
@@ -160,8 +196,13 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   let pending: { id: number; position: Point } | null = null;
   let selected: TileKind | null = null;
   const steps: RecordStep[] = [];
+  let status: GameStatus = 'playing';
+  /** Dead edges of the current tiling, recomputed lazily after each change. */
+  let deadCache: { from: Point; to: Point }[] | null = null;
+  const deadEdges = () => (deadCache ??= tiling.deadEdges());
   const listeners = new Set<(event: GameEvent) => void>();
   const emit = (event: GameEvent) => {
+    if (event.type === 'tiling-changed') deadCache = null;
     for (const l of [...listeners]) l(event);
   };
 
@@ -182,9 +223,20 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   };
 
   const place = (placement: Placement, position?: Point): boolean => {
+    if (status === 'over') return false;
     if (!tileSet.kinds.includes(placement.kind) || !tiling.isLegal(placement)) return false;
     const attached = placementVertices(tileSet, placement).filter((v) => tiling.vertex(pointKey(v)));
     const anchor = (position && attached.find((v) => pointKey(v) === pointKey(position))) ?? attached[0]!;
+    if (deadEdges().length > 0) {
+      // confirm the pending tile; the confirmed tiling has a dead end, so the game ends here
+      // (the step is recorded so a replay ends the same way; the new tile itself is not added)
+      pending = null;
+      status = 'over';
+      steps.push({ type: 'place', placement: { ...placement, dir: mod10(placement.dir) }, position: anchor });
+      emit({ type: 'tiling-changed' });
+      emit({ type: 'game-over' });
+      return true;
+    }
     pending = { id: tiling.add(placement).id, position: anchor };
     steps.push({ type: 'place', placement: tiling.tiles[pending.id]!.placement, position: anchor });
     emit({ type: 'tiling-changed' });
@@ -271,6 +323,16 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
       return { point: rec.point, corners, complete, configuration: complete ? classify(tileSet, corners) : null };
     },
     selectedKind: () => selected,
+    status: () => status,
+    deadEnds: () => {
+      const cause = status === 'over' ? 'confirmed' : 'pending';
+      return deadEdges().map(({ from, to }) => ({ from, to, cause }));
+    },
+    score() {
+      const confirmed = tiling.tiles.filter((t) => t.id !== pending?.id);
+      const area = confirmed.reduce((s, t) => s + shapeOf(tileSet, t.placement.kind).area, 0);
+      return { tiles: confirmed.length, area };
+    },
     record: () => ({
       tileSet: tileSet.id,
       ...(options.seed === undefined ? {} : { seed: options.seed }),
