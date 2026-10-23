@@ -8,6 +8,7 @@ import { DIRECTIONS, mod10, ORIGIN, pointKey, toXY, type Point } from './point';
 import type { GameRecord, RecordStep } from './record';
 import { centerOf, placementKey, Tiling } from './tiling';
 import { shapeOf, type CornerRef, type TileKind, type TileSet } from './tileset';
+import { GROWTH_MARGIN } from './tuning';
 
 export interface PlacedTile extends Placement {
   readonly id: number;
@@ -21,6 +22,12 @@ export interface GameOptions {
   readonly opening?: readonly Placement[];
   /** The seed `opening` was generated from, kept in the record for reference. */
   readonly seed?: number;
+  /**
+   * Growth-circle margin (defaults to GROWTH_MARGIN; Infinity = no circle).
+   * For tuning and tests only: it is not stored in the record, so a replay
+   * uses the default.
+   */
+  readonly growthMargin?: number;
 }
 
 export interface Game {
@@ -67,6 +74,12 @@ export interface Game {
   deadEnds(): readonly DeadEnd[];
   /** Score of the confirmed tiling: its tile count and total area in squared length units. */
   score(): Score;
+  /**
+   * The growth circle: centred on the confirmed tiling's centroid, radius
+   * √(area / π) + margin (area of the confirmed tiling). Only boundary edges
+   * that reach into it take new tiles.
+   */
+  growthCircle(): GrowthCircle;
   /**
    * The game record so far: tile set, opening, and every step that changed
    * the board (places, turns and removals of the pending tile), in order.
@@ -135,6 +148,12 @@ export interface DeadEnd {
   readonly cause: 'pending' | 'confirmed';
 }
 
+export interface GrowthCircle {
+  /** Floating-point world coordinates (y up, short edge = 1). */
+  readonly center: { readonly x: number; readonly y: number };
+  readonly radius: number;
+}
+
 export interface Score {
   readonly tiles: number;
   /** Total area in squared length units (shortest edge = 1). */
@@ -158,6 +177,30 @@ function classify(tileSet: TileSet, corners: readonly CornerRef[]): string | nul
     }
   }
   return null;
+}
+
+/**
+ * Growth circle of a set of tiles: area-weighted centroid (shoelace) and
+ * radius √(area / π) + margin. Floating point, but deterministic (IEEE-754,
+ * fixed summation order), so replays agree.
+ */
+function growthCircleOf(tiles: readonly { vertices: readonly Point[] }[], margin: number): GrowthCircle {
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  for (const t of tiles) {
+    const p = t.vertices.map(toXY);
+    for (let i = 0; i < p.length; i++) {
+      const q = p[i]!;
+      const r = p[(i + 1) % p.length]!;
+      const c = q.x * r.y - r.x * q.y;
+      area += c / 2;
+      cx += ((q.x + r.x) * c) / 6;
+      cy += ((q.y + r.y) * c) / 6;
+    }
+  }
+  const center = area > 0 ? { x: cx / area, y: cy / area } : { x: 0, y: 0 };
+  return { center, radius: Math.sqrt(area / Math.PI) + margin };
 }
 
 /** The tile sets a record can name. */
@@ -196,6 +239,7 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   const opening = options.opening ?? [{ kind: 'kite' as TileKind, origin: ORIGIN, dir: 0 }];
   const tiling = new Tiling(tileSet);
   for (const p of opening) tiling.add(p);
+  const margin = options.growthMargin ?? GROWTH_MARGIN;
 
   const toPlaced = (id: number): PlacedTile => {
     const rec = tiling.tiles[id]!;
@@ -204,17 +248,48 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
 
   /** The pending tile is always the last tile of the tiling; `position` is where it was attached. */
   let pending: { id: number; position: Point } | null = null;
+  const confirmed = () => tiling.tiles.filter((t) => t.id !== pending?.id);
+  const circle = () => growthCircleOf(confirmed(), margin);
+  /** Points the tiling's growth region at the current growth circle (after the confirmed tiling changes). */
+  const syncRegion = () => {
+    if (margin === Infinity) return;
+    const { center, radius } = circle();
+    tiling.setRegion({ x: center.x, y: center.y, r: radius });
+  };
+  syncRegion();
   let selected: TileKind | null = null;
   const steps: RecordStep[] = [];
   let status: GameStatus = 'playing';
   /** Dead edges of the current tiling, recomputed lazily after each change. */
   let deadCache: { from: Point; to: Point }[] | null = null;
-  const deadEdges = () => (deadCache ??= tiling.deadEdges());
+  /** The dead edges that ended the game, kept as they were (the circle moves once the pending tile is confirmed). */
+  let finalDead: { from: Point; to: Point }[] | null = null;
+  const deadEdges = () => finalDead ?? (deadCache ??= tiling.deadEdges());
   const listeners = new Set<(event: GameEvent) => void>();
-  const emit = (event: GameEvent) => {
-    if (event.type === 'tiling-changed') deadCache = null;
-    for (const l of [...listeners]) l(event);
+  /**
+   * No candidate placement anywhere inside the growth circle: nothing can be
+   * added any more, so the game is over at once (the pending tile, if any, is
+   * confirmed and scores, as with a visible dead end).
+   */
+  const endIfStuck = (): boolean => {
+    if (status === 'over' || tileSet.kinds.some((k) => tiling.candidates(k).length > 0)) return false;
+    pending = null;
+    status = 'over';
+    syncRegion();
+    deadCache = null;
+    return true;
   };
+  const emit = (event: GameEvent) => {
+    let stuck = false;
+    if (event.type === 'tiling-changed') {
+      syncRegion();
+      deadCache = null;
+      stuck = endIfStuck();
+    }
+    for (const l of [...listeners]) l(event);
+    if (stuck) emit({ type: 'game-over' });
+  };
+  endIfStuck();
 
   const orientationsAt = (position: Point, kind: TileKind): Placement[] => {
     const key = pointKey(position);
@@ -235,13 +310,16 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   const place = (placement: Placement, position?: Point): boolean => {
     if (status === 'over') return false;
     if (!tileSet.kinds.includes(placement.kind) || !tiling.isLegal(placement)) return false;
+    if (!tiling.gluedInRegion(placement)) return false;
     const attached = placementVertices(tileSet, placement).filter((v) => tiling.vertex(pointKey(v)));
     const anchor = (position && attached.find((v) => pointKey(v) === pointKey(position))) ?? attached[0]!;
-    if (deadEdges().length > 0) {
+    const dead = deadEdges();
+    if (dead.length > 0) {
       // confirm the pending tile; the confirmed tiling has a dead end, so the game ends here
       // (the step is recorded so a replay ends the same way; the new tile itself is not added)
       pending = null;
       status = 'over';
+      finalDead = dead;
       steps.push({ type: 'place', placement: { ...placement, dir: mod10(placement.dir) }, position: anchor });
       emit({ type: 'tiling-changed' });
       emit({ type: 'game-over' });
@@ -343,6 +421,7 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
       const area = confirmed.reduce((s, t) => s + shapeOf(tileSet, t.placement.kind).area, 0);
       return { tiles: confirmed.length, area };
     },
+    growthCircle: circle,
     record: () => ({
       tileSet: tileSet.id,
       ...(options.seed === undefined ? {} : { seed: options.seed }),

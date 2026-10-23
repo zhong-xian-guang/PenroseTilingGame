@@ -6,10 +6,14 @@
    */
   import { toXY, type PlacedTile, type ReplayFrame } from '../engine';
   import { Camera } from '../board/camera';
-  import { DEFAULT_PALETTE, drawBoard } from '../board/renderer';
+  import { DEFAULT_PALETTE, drawBoard, type Palette } from '../board/renderer';
   import { t } from '../i18n/index.svelte';
 
-  let { frames }: { frames: readonly ReplayFrame[] } = $props();
+  let {
+    frames,
+    palette = DEFAULT_PALETTE,
+    showArcs = true,
+  }: { frames: readonly ReplayFrame[]; palette?: Palette; showArcs?: boolean } = $props();
 
   const last = $derived(Math.max(0, frames.length - 1));
   let index = $state(0);
@@ -73,7 +77,7 @@
     if (bounds) camera.fit(bounds.min, bounds.max, 1);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    drawBoard(ctx, frame, camera, dpr, DEFAULT_PALETTE, { showArcs: true, pendingHovered: false, preview: null });
+    drawBoard(ctx, frame, camera, dpr, palette, { showArcs, pendingHovered: false, preview: null });
   });
 </script>
 

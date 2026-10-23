@@ -5,10 +5,17 @@
    * computed from the game record (engine `analyzeRecord` / `replayFrames`).
    */
   import { analyzeRecord, replayFrames, type GameRecord } from '../engine';
+  import type { Palette } from '../board/renderer';
   import { t } from '../i18n/index.svelte';
   import Replay from './Replay.svelte';
 
-  let { open, record, onback }: { open: boolean; record: GameRecord | null; onback: () => void } = $props();
+  let {
+    open,
+    record,
+    palette,
+    showArcs,
+    onback,
+  }: { open: boolean; record: GameRecord | null; palette?: Palette; showArcs?: boolean; onback: () => void } = $props();
 
   let dialog: HTMLDialogElement;
 
@@ -122,7 +129,7 @@
 
     <section>
       <h3>{t('analysis.replay')}</h3>
-      <Replay {frames} />
+      <Replay {frames} {palette} {showArcs} />
     </section>
   {/if}
 </dialog>

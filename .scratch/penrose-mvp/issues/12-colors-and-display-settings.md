@@ -4,10 +4,10 @@
 
 **Blocked by:** 07 棋譜與自動存檔續玩
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 設定面板（原生 `<dialog>`）可以選擇 kite、dart、背景色
-- [ ] 提供幾組 preset 配色
-- [ ] 可以開關 Conway 弧線，預設開啟；弧線顏色依配色自動推導，在任何 preset 上都清楚可見
-- [ ] 設定存進 IndexedDB，重新整理後保留
-- [ ] 對話框可以用 Esc 關閉，關閉後焦點回到開啟它的按鈕
+- [x] 設定面板（原生 `<dialog>`）可以選擇 kite、dart、背景色
+- [x] 提供幾組 preset 配色
+- [x] 可以開關 Conway 弧線，預設開啟；弧線顏色依配色自動推導，在任何 preset 上都清楚可見
+- [x] 設定存進 IndexedDB，重新整理後保留
+- [x] 對話框可以用 Esc 關閉，關閉後焦點回到開啟它的按鈕

@@ -41,7 +41,7 @@ export interface GameStats {
  */
 export type ReplayFrame = Pick<
   Game,
-  'tileSet' | 'confirmedTiles' | 'pendingTile' | 'deadEnds' | 'status' | 'score' | 'verticesOf'
+  'tileSet' | 'confirmedTiles' | 'pendingTile' | 'deadEnds' | 'status' | 'score' | 'verticesOf' | 'growthCircle'
 >;
 
 /**
@@ -57,6 +57,7 @@ export function replayFrames(record: GameRecord): ReplayFrame[] {
     const dead: readonly DeadEnd[] = game.deadEnds();
     const status: GameStatus = game.status();
     const score: Score = game.score();
+    const circle = game.growthCircle();
     frames.push({
       tileSet: game.tileSet,
       confirmedTiles: () => confirmed,
@@ -64,6 +65,7 @@ export function replayFrames(record: GameRecord): ReplayFrame[] {
       deadEnds: () => dead,
       status: () => status,
       score: () => score,
+      growthCircle: () => circle,
       verticesOf: game.verticesOf,
     });
   });

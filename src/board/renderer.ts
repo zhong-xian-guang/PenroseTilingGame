@@ -15,6 +15,8 @@ export interface Palette {
   pending: string;
   /** Marks a visible dead end (a boundary edge nothing fits onto). */
   deadEnd: string;
+  /** The growth circle (only the boundary inside it takes new tiles); drawn faintly. */
+  growthCircle: string;
 }
 
 export const DEFAULT_PALETTE: Palette = {
@@ -25,10 +27,14 @@ export const DEFAULT_PALETTE: Palette = {
   arcB: '#1f4f7a',
   pending: '#d1495b',
   deadEnd: '#e03131',
+  growthCircle: 'rgba(43, 52, 64, 0.35)',
 };
 
 /** What the renderer reads: a live Game, or a frozen replay frame (ReplayFrame). */
-export type BoardView = Pick<Game, 'tileSet' | 'confirmedTiles' | 'pendingTile' | 'deadEnds' | 'verticesOf'>;
+export type BoardView = Pick<
+  Game,
+  'tileSet' | 'confirmedTiles' | 'pendingTile' | 'deadEnds' | 'verticesOf' | 'growthCircle'
+>;
 
 export interface Preview {
   placement: Placement;
@@ -59,6 +65,24 @@ export function drawBoard(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = palette.background;
   ctx.fillRect(0, 0, camera.width, camera.height);
+
+  // the growth circle: a faint dashed ring with a whisper of fill, under the tiles
+  const circle = game.growthCircle();
+  if (Number.isFinite(circle.radius) && circle.radius > 0) {
+    const c = camera.toScreen(circle.center);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, circle.radius * camera.scale, 0, Math.PI * 2);
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = palette.growthCircle;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([6, 6]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = palette.growthCircle;
+    ctx.stroke();
+    ctx.restore();
+  }
 
   for (const tile of game.confirmedTiles()) {
     drawTile(ctx, game, camera, palette, tile, tile.vertices.map(toXY), scene.showArcs, 1);
