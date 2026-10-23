@@ -3,12 +3,13 @@
   import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE } from '../board/renderer';
+  import { Autosave } from '../storage/autosave';
   import Tray from './Tray.svelte';
 
   /** A fresh game starting from a random opening patch. */
   const newGame = (): Game => {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
-    return createGame({ tileSet: P2, opening: openingPatch(seed) });
+    return createGame({ tileSet: P2, opening: openingPatch(seed), seed });
   };
 
   // The board holds the game, so a new game re-attaches it (see attach); nothing renders from game directly.
@@ -44,14 +45,34 @@
     recompute();
   };
 
+  // Every step is saved automatically; on load the last game resumes (no manual save/load).
+  let autosave: Autosave | null = null;
+
   const startNewGame = () => {
     game = newGame();
     attach();
+    void autosave?.track(game);
   };
 
   onMount(() => {
     attach();
+    let alive = true;
+    void (async () => {
+      const store = await Autosave.open();
+      if (!alive || !store) return;
+      autosave = store;
+      const resumed = await store.resume().catch(() => null);
+      if (!alive) return;
+      if (resumed) {
+        game = resumed;
+        attach();
+      } else {
+        void store.track(game);
+      }
+    })();
     return () => {
+      alive = false;
+      autosave?.detach();
       offGame?.();
       offGame = null;
       board?.destroy();
