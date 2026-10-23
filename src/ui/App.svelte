@@ -21,10 +21,15 @@
   recompute();
 
   let canvas: HTMLCanvasElement;
+  let trayZone: HTMLElement;
   let board: Board | null = null;
+  /** A finger holds the pending tile over the tray (lifting it there removes it). */
+  let removing = $state(false);
 
   onMount(() => {
     board = new Board(canvas, game);
+    board.trayElement = trayZone;
+    board.onTrayDropTarget = (r) => (removing = r);
     const off = game.subscribe((e) => {
       recompute();
       if (e.type === 'selection-changed') board?.refresh();
@@ -75,14 +80,18 @@
         先在下方挑一片拼塊
       {/if}
     </p>
-    <Tray
-      kinds={game.tileSet.kinds}
-      {selected}
-      colors={DEFAULT_PALETTE.tiles}
-      {icons}
-      {labels}
-      onselect={(kind) => game.select(kind)}
-    />
+    <div bind:this={trayZone}>
+      <Tray
+        kinds={game.tileSet.kinds}
+        {selected}
+        colors={DEFAULT_PALETTE.tiles}
+        {icons}
+        {labels}
+        {removing}
+        onselect={(kind) => game.select(kind)}
+        ondragout={(kind, e) => board?.beginTrayDrag(kind, e)}
+      />
+    </div>
   </footer>
 </main>
 
