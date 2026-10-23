@@ -1,0 +1,30 @@
+:root {
+  --bg: #f6f4ef;
+  --panel: #ffffffe6;
+  --ink: #2b3440;
+  --muted: #6b7380;
+  --accent: #3f7fb5;
+  --kite: #7fa6d6;
+  --dart: #ecbc74;
+  color-scheme: light;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  overscroll-behavior: none;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+}

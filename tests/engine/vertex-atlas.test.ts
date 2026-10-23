@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createGame, ORIGIN, P2, pointKey, type Placement, type Point } from '../../src/engine';
 
 const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${p.dir}`;
