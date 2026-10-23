@@ -9,6 +9,7 @@
   "zoom.fit": "置中",
   "hint.pick": "先在下方挑一片拼塊",
   "hint.place": "移到邊界上看預覽 · 滾輪換方向 · 左鍵放下 · 拖曳平移 · Ctrl + 滾輪縮放",
+  "hint.touch": "從下方把拼塊拖到邊界上放下 · 點預放換方向 · 拖回托盤移除 · 單指平移 · 雙指縮放",
   "tray.label": "拼塊托盤",
   "tile.kite": "風箏",
   "tile.dart": "飛鏢",
@@ -34,5 +35,8 @@
   "settings.marks": "匹配標記",
   "settings.arcs": "顯示 Conway 弧線",
   "settings.arcs.note": "弧線顏色會依配色自動調整。關掉弧線只看形狀，可以當作困難模式。",
-  "settings.close": "完成"
+  "settings.close": "完成",
+  "gameOver.title": "遊戲結束",
+  "gameOver.reason": "鋪砌邊界出現了放不進任何拼塊的凹洞。",
+  "gameOver.areaUnit": "平方單位"
 }

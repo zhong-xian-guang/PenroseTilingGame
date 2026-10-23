@@ -13,13 +13,45 @@
  * Over the pending tile (the one placed last):
  *   wheel           cycle its legal orientations
  *   right click     remove it
+ *
+ * Touch (and pen), all with one finger unless noted:
+ *   drag from tray  carry a tile; the preview snaps to the candidate nearest a
+ *                   point FINGER_LIFT px above the finger, so the finger does
+ *                   not hide it; lifting the finger places it (as the pending
+ *                   tile), or does nothing when no candidate is near or the
+ *                   finger is back on the tray
+ *   tap pending     cycle its legal orientations
+ *   drag pending    drag it onto the tray to remove it
+ *   drag elsewhere  pan
+ *   two fingers     pinch zoom (and pan); never places anything
  */
-import { pointKey, toXY, type Game, type Pick, type Point } from '../engine';
+import { ORIGIN, pointKey, toXY, type Game, type Pick, type Placement, type Point, type TileKind } from '../engine';
 import { Camera, type XY } from './camera';
 import { DEFAULT_PALETTE, drawBoard, type Palette } from './renderer';
 
 const DRAG_THRESHOLD = 4; // CSS px before a press becomes a pan
 const WHEEL_ZOOM = 1.0015; // per wheel delta unit
+const TOUCH_SLOP = 10; // CSS px a finger may wander and still count as a tap
+const FINGER_LIFT = 72; // CSS px between the finger and the point it aims at
+
+/** What the fingers on the canvas are doing. */
+type TouchGesture =
+  | { type: 'pan'; id: number; last: XY }
+  /** A finger went down on the pending tile: a tap turns it, a drag carries it (to the tray to remove it). */
+  | { type: 'pending'; id: number; start: XY; dragging: boolean }
+  | { type: 'pinch'; dist: number; mid: XY }
+  /** Fingers are down but no longer drive anything (e.g. after a pinch, until all fingers lift). */
+  | { type: 'idle' };
+
+/** A tile carried out of the tray by a finger. */
+interface TrayDrag {
+  id: number;
+  kind: TileKind;
+  /** Finger position in canvas CSS px. */
+  finger: XY;
+  overTray: boolean;
+  hover: Hover | null;
+}
 
 interface Hover {
   pick: Pick;
@@ -41,6 +73,17 @@ export class Board {
   private overPending = false;
   private readonly cleanup: (() => void)[] = [];
 
+  /** Element a carried tile can be dropped back onto (the tray); set by the UI. */
+  trayElement: HTMLElement | null = null;
+  /** Told whether a finger currently holds the pending tile over the tray (lifting it there removes it). */
+  onTrayDropTarget: ((removing: boolean) => void) | null = null;
+
+  private readonly touches = new Map<number, XY>();
+  private gesture: TouchGesture | null = null;
+  private trayDrag: TrayDrag | null = null;
+  private trayDropTarget = false;
+  private stopTrayDrag: () => void = () => {};
+
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly game: Game,
@@ -58,7 +101,10 @@ export class Board {
     this.listen(canvas, 'pointerdown', (e) => this.onPointerDown(e));
     this.listen(canvas, 'pointermove', (e) => this.onPointerMove(e));
     this.listen(canvas, 'pointerup', (e) => this.onPointerUp(e));
-    this.listen(canvas, 'pointercancel', () => (this.press = null));
+    this.listen(canvas, 'pointercancel', (e) => {
+      if (e.pointerType === 'mouse') this.press = null;
+      else this.onTouchEnd(e, true);
+    });
     this.listen(canvas, 'pointerleave', () => {
       this.pointer = null;
       this.updateHover();
@@ -75,6 +121,7 @@ export class Board {
 
   destroy(): void {
     cancelAnimationFrame(this.frame);
+    this.stopTrayDrag();
     for (const f of this.cleanup) f();
   }
 
@@ -132,6 +179,7 @@ export class Board {
   }
 
   private onPointerDown(e: PointerEvent): void {
+    if (e.pointerType !== 'mouse') return this.onTouchDown(e);
     if (e.button === 2) {
       this.pointer = this.local(e);
       this.updateHover();
@@ -145,6 +193,7 @@ export class Board {
   }
 
   private onPointerMove(e: PointerEvent): void {
+    if (e.pointerType !== 'mouse') return this.onTouchMove(e);
     const p = this.local(e);
     this.pointer = p;
     const press = this.press;
@@ -163,6 +212,7 @@ export class Board {
   }
 
   private onPointerUp(e: PointerEvent): void {
+    if (e.pointerType !== 'mouse') return this.onTouchEnd(e, false);
     const press = this.press;
     if (!press || press.id !== e.pointerId) return;
     this.press = null;
@@ -194,6 +244,141 @@ export class Board {
     this.requestDraw();
   }
 
+  // ---- touch: carrying a tile out of the tray ----
+
+  /**
+   * A finger went down on the tray button for `kind`: the board follows that
+   * finger (wherever its events are delivered) until it lifts.
+   */
+  beginTrayDrag(kind: TileKind, e: PointerEvent): void {
+    if (this.trayDrag) return;
+    this.game.select(kind);
+    const drag: TrayDrag = { id: e.pointerId, kind, finger: this.local(e), overTray: true, hover: null };
+    this.trayDrag = drag;
+    const follow = (ev: PointerEvent) => {
+      drag.finger = this.local(ev);
+      drag.overTray = this.overTray(ev);
+      const pick = drag.overTray || this.game.status() === 'over' ? null : this.game.pickNear(this.camera.toWorld(aimOf(drag.finger)), kind);
+      drag.hover = pick ? { pick, index: Math.max(0, pick.index) } : null;
+      this.requestDraw();
+    };
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId === drag.id) follow(ev);
+    };
+    const end = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag.id) return;
+      stop();
+      follow(ev);
+      this.trayDrag = null;
+      const placement = drag.hover?.pick.orientations[drag.hover.index];
+      if (ev.type === 'pointerup' && placement && drag.hover) this.game.place(placement, drag.hover.pick.position);
+      this.requestDraw();
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    this.stopTrayDrag = stop;
+  }
+
+  private overTray(e: MouseEvent): boolean {
+    const r = this.trayElement?.getBoundingClientRect();
+    return !!r && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  }
+
+  // ---- touch: fingers on the canvas ----
+
+  private onTouchDown(e: PointerEvent): void {
+    if (this.trayDrag) return;
+    const p = this.local(e);
+    this.touches.set(e.pointerId, p);
+    this.canvas.setPointerCapture(e.pointerId);
+    if (this.touches.size === 1) {
+      const pending = this.game.pendingTile();
+      const onPending = !!pending && insidePolygon(this.camera.toWorld(p), pending.vertices.map(toXY));
+      this.gesture = onPending
+        ? { type: 'pending', id: e.pointerId, start: p, dragging: false }
+        : { type: 'pan', id: e.pointerId, last: p };
+    } else if (this.touches.size === 2) {
+      this.setTrayDropTarget(false);
+      this.gesture = this.pinchState();
+    } else {
+      this.gesture = { type: 'idle' };
+    }
+    this.requestDraw();
+  }
+
+  private onTouchMove(e: PointerEvent): void {
+    if (!this.touches.has(e.pointerId)) return;
+    const p = this.local(e);
+    this.touches.set(e.pointerId, p);
+    const g = this.gesture;
+    if (g?.type === 'pan' && g.id === e.pointerId) {
+      this.camera.panBy(p.x - g.last.x, p.y - g.last.y);
+      g.last = p;
+    } else if (g?.type === 'pending' && g.id === e.pointerId) {
+      if (!g.dragging && Math.hypot(p.x - g.start.x, p.y - g.start.y) > TOUCH_SLOP) g.dragging = true;
+      if (g.dragging) this.setTrayDropTarget(this.overTray(e));
+    } else if (g?.type === 'pinch') {
+      const next = this.pinchState();
+      if (next.type === 'pinch') {
+        this.camera.panBy(next.mid.x - g.mid.x, next.mid.y - g.mid.y);
+        if (g.dist > 0) this.camera.zoomAt(next.mid, next.dist / g.dist);
+        this.gesture = next;
+      }
+    }
+    this.requestDraw();
+  }
+
+  private onTouchEnd(e: PointerEvent, cancelled: boolean): void {
+    if (!this.touches.delete(e.pointerId)) return;
+    const g = this.gesture;
+    if (g?.type === 'pending' && g.id === e.pointerId && !cancelled) {
+      if (!g.dragging) this.game.turnPending(1);
+      else if (this.overTray(e)) this.game.removePending();
+    }
+    this.setTrayDropTarget(false);
+    // after a pinch the remaining finger does nothing until all fingers lift (no jump into a pan)
+    this.gesture = this.touches.size === 0 ? null : { type: 'idle' };
+    this.requestDraw();
+  }
+
+  private pinchState(): TouchGesture {
+    const [a, b] = [...this.touches.values()];
+    if (!a || !b) return { type: 'idle' };
+    return { type: 'pinch', dist: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+  }
+
+  private setTrayDropTarget(removing: boolean): void {
+    if (removing === this.trayDropTarget) return;
+    this.trayDropTarget = removing;
+    this.onTrayDropTarget?.(removing);
+  }
+
+  /** The tile a finger carries that is not snapped onto the tiling (see Scene.ghost). */
+  private ghost(): { placement: Placement; pts: XY[] } | null {
+    const drag = this.trayDrag;
+    if (drag) {
+      if (drag.hover || drag.overTray) return null;
+      const placement: Placement = { kind: drag.kind, origin: ORIGIN, dir: 2 };
+      const pts = this.game.verticesOf(placement).map(toXY);
+      const c = centroid(pts);
+      const at = this.camera.toWorld(aimOf(drag.finger));
+      return { placement, pts: pts.map((q) => ({ x: q.x - c.x + at.x, y: q.y - c.y + at.y })) };
+    }
+    const g = this.gesture;
+    const pending = this.game.pendingTile();
+    const now = g?.type === 'pending' && g.dragging ? this.touches.get(g.id) : undefined;
+    if (g?.type !== 'pending' || !now || !pending) return null;
+    const a = this.camera.toWorld(g.start);
+    const b = this.camera.toWorld(now);
+    return { placement: pending, pts: pending.vertices.map(toXY).map((q) => ({ x: q.x + b.x - a.x, y: q.y + b.y - a.y })) };
+  }
+
   private previewPlacement() {
     return this.hover ? (this.hover.pick.orientations[this.hover.index] ?? null) : null;
   }
@@ -206,7 +391,8 @@ export class Board {
       !!this.pointer &&
       !this.press?.dragging &&
       insidePolygon(this.camera.toWorld(this.pointer), pending.vertices.map(toXY));
-    if (!kind || !this.pointer || this.press?.dragging || this.overPending) {
+    const over = this.game.status() === 'over';
+    if (!kind || over || !this.pointer || this.press?.dragging || this.overPending) {
       this.hover = null;
     } else {
       const world = this.camera.toWorld(this.pointer);
@@ -229,16 +415,27 @@ export class Board {
   }
 
   private draw(): void {
-    const placement = this.previewPlacement();
+    const hover = this.trayDrag ? this.trayDrag.hover : this.hover;
+    const placement = hover ? (hover.pick.orientations[hover.index] ?? null) : null;
+    const g = this.gesture;
     drawBoard(this.ctx, this.game, this.camera, this.dpr, this.palette, {
       showArcs: this.showArcs,
-      pendingHovered: this.overPending,
-      preview: placement && this.hover ? { placement, position: this.hover.pick.position } : null,
+      pendingHovered: this.overPending || (g?.type === 'pending' && !g.dragging),
+      preview: placement && hover ? { placement, position: hover.pick.position } : null,
+      ghost: this.ghost(),
     });
   }
 }
 
 const samePosition = (a: Point, b: Point) => pointKey(a) === pointKey(b);
+
+/** The point a finger aims at: a little above it, so the finger does not hide what it points at. */
+const aimOf = (finger: XY): XY => ({ x: finger.x, y: finger.y - FINGER_LIFT });
+
+function centroid(pts: readonly XY[]): XY {
+  const n = pts.length || 1;
+  return { x: pts.reduce((s, p) => s + p.x, 0) / n, y: pts.reduce((s, p) => s + p.y, 0) / n };
+}
 
 /** Even-odd point-in-polygon test (pointer hit-testing only). */
 function insidePolygon(p: XY, poly: readonly XY[]): boolean {

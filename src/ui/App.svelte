@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type TileKind } from '../engine';
+  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type Score, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE, type Palette } from '../board/renderer';
   import { derivePalette } from '../settings/palette';
@@ -8,6 +8,7 @@
   import { Autosave } from '../storage/autosave';
   import Tray from './Tray.svelte';
   import Menu from './Menu.svelte';
+  import GameOverDialog from './GameOverDialog.svelte';
   import { t } from '../i18n/index.svelte';
 
   /** A fresh game starting from a random opening patch. */
@@ -21,19 +22,23 @@
 
   // Engine state mirrored into Svelte via $state; refreshed from engine events.
   let selected = $state<TileKind | null>(game.selectedKind());
-  let tileCount = $state(game.tiles().length);
-  let area = $state(0);
+  let score = $state<Score>(game.score());
+  let over = $state(game.status() === 'over');
 
   const recompute = () => {
     selected = game.selectedKind();
-    const tiles = game.tiles();
-    tileCount = tiles.length;
-    area = tiles.reduce((s, t) => s + game.tileSet.shapes[t.kind]!.area, 0);
+    score = game.score();
+    over = game.status() === 'over';
   };
   recompute();
 
   let canvas: HTMLCanvasElement;
+  let trayZone: HTMLElement;
   let board: Board | null = null;
+  /** A finger holds the pending tile over the tray (lifting it there removes it). */
+  let removing = $state(false);
+  /** Touch-first device: show the finger controls in the hint. */
+  const coarsePointer = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 
   let offGame: (() => void) | null = null;
 
@@ -55,6 +60,9 @@
     offGame?.();
     board?.destroy();
     board = new Board(canvas, game);
+    board.trayElement = trayZone;
+    removing = false;
+    board.onTrayDropTarget = (r) => (removing = r);
     applySettings();
     offGame = game.subscribe((e) => {
       recompute();
@@ -120,8 +128,8 @@
   <canvas bind:this={canvas} aria-label={t('board.label')}></canvas>
 
   <header class="hud">
-    <div><span class="label">{t('hud.tiles')}</span> <strong>{tileCount}</strong></div>
-    <div><span class="label">{t('hud.area')}</span> <strong>{area.toFixed(2)}</strong></div>
+    <div><span class="label">{t('hud.tiles')}</span> <strong>{score.tiles}</strong></div>
+    <div><span class="label">{t('hud.area')}</span> <strong>{score.area.toFixed(2)}</strong></div>
   </header>
 
   <Menu />
@@ -142,21 +150,29 @@
 
   <footer>
     <p class="hint">
-      {#if selected}
+      {#if coarsePointer}
+        {t('hint.touch')}
+      {:else if selected}
         {t('hint.place')}
       {:else}
         {t('hint.pick')}
       {/if}
     </p>
-    <Tray
-      kinds={P2.kinds}
-      {selected}
-      colors={palette.tiles}
-      {icons}
-      {labels}
-      onselect={(kind) => game.select(kind)}
-    />
+    <div bind:this={trayZone}>
+      <Tray
+        kinds={P2.kinds}
+        {selected}
+        colors={palette.tiles}
+        {icons}
+        {labels}
+        {removing}
+        onselect={(kind) => game.select(kind)}
+        ondragout={(kind, e) => board?.beginTrayDrag(kind, e)}
+      />
+    </div>
   </footer>
+
+  <GameOverDialog open={over} {score} onnewgame={startNewGame} />
 </main>
 
 <style>
