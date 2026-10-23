@@ -1,0 +1,23 @@
+{
+  "app.title": "Penrose Tiling",
+  "board.label": "Board",
+  "hud.tiles": "Tiles",
+  "hud.area": "Area",
+  "zoom.in": "Zoom in",
+  "zoom.out": "Zoom out",
+  "zoom.fit": "Center",
+  "hint.pick": "Pick a tile below",
+  "hint.place": "Hover the edge to preview · Wheel to rotate · Click to place · Drag to pan · Ctrl + wheel to zoom",
+  "tray.label": "Tile tray",
+  "tile.kite": "Kite",
+  "tile.dart": "Dart",
+  "language.switch": "Switch language",
+  "language.other": "中文",
+  "about.open": "About",
+  "about.title": "About Penrose Tiling",
+  "about.intro": "A tile-laying game built on the kites and darts of the Penrose tiling. Every tile must obey the matching rules; the game ends as soon as the boundary has a gap that no tile can fill.",
+  "about.fonts.title": "Fonts",
+  "about.fonts.credit": "The interface fonts are based on LINE Seed Sans and LINE Seed TW by LY Corporation. This game keeps only the characters the interface uses and renames them PTG Sans and PTG Sans TC, distributed under the SIL Open Font License 1.1.",
+  "about.fonts.license": "SIL Open Font License 1.1, full text",
+  "about.close": "Close"
+}

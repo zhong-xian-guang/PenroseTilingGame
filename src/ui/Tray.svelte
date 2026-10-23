@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { TileKind } from '../engine';
+  import { t } from '../i18n/index.svelte';
 
   interface Props {
     kinds: readonly TileKind[];
@@ -14,7 +15,7 @@
   let { kinds, selected, colors, icons, labels, onselect }: Props = $props();
 </script>
 
-<div class="tray" role="toolbar" aria-label="拼塊托盤">
+<div class="tray" role="toolbar" aria-label={t('tray.label')}>
   {#each kinds as kind (kind)}
     <button
       type="button"
