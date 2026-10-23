@@ -6,6 +6,7 @@
 export { createGame } from './game';
 export type { Game, GameEvent, GameOptions, Pick, PlacedTile, VertexInfo } from './game';
 export type { Placement } from './geometry';
+export { openingPatch, OPENING_MIN_TILES, OPENING_MAX_TILES } from './opening';
 export { P2 } from './p2';
 export type {
   ArcSpec,

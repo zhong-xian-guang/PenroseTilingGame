@@ -1,11 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createGame, ORIGIN, toXY, type TileKind } from '../engine';
+  import { createGame, openingPatch, ORIGIN, P2, toXY, type Game, type TileKind } from '../engine';
   import { Board } from '../board/board';
   import { DEFAULT_PALETTE } from '../board/renderer';
   import Tray from './Tray.svelte';
 
-  const game = createGame();
+  /** A fresh game starting from a random opening patch. */
+  const newGame = (): Game => {
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
+    return createGame({ tileSet: P2, opening: openingPatch(seed) });
+  };
+
+  // The board holds the game, so a new game re-attaches it (see attach); nothing renders from game directly.
+  let game = newGame();
 
   // Engine state mirrored into Svelte via $state; refreshed from engine events.
   let selected = $state<TileKind | null>(game.selectedKind());
@@ -23,14 +30,30 @@
   let canvas: HTMLCanvasElement;
   let board: Board | null = null;
 
-  onMount(() => {
+  let offGame: (() => void) | null = null;
+
+  /** (Re)attach the board to the current game; the board centres and zooms on the opening patch. */
+  const attach = () => {
+    offGame?.();
+    board?.destroy();
     board = new Board(canvas, game);
-    const off = game.subscribe((e) => {
+    offGame = game.subscribe((e) => {
       recompute();
       if (e.type === 'selection-changed') board?.refresh();
     });
+    recompute();
+  };
+
+  const startNewGame = () => {
+    game = newGame();
+    attach();
+  };
+
+  onMount(() => {
+    attach();
     return () => {
-      off();
+      offGame?.();
+      offGame = null;
       board?.destroy();
       board = null;
     };
@@ -38,8 +61,8 @@
 
   /** Tray icons: each tile kind normalised into a 0–1 box, y flipped for SVG. */
   const icons = Object.fromEntries(
-    game.tileSet.kinds.map((kind) => {
-      const pts = game.verticesOf({ kind, origin: ORIGIN, dir: 2 }).map(toXY);
+    P2.kinds.map((kind) => {
+      const pts = createGame({ opening: [] }).verticesOf({ kind, origin: ORIGIN, dir: 2 }).map(toXY);
       const minX = Math.min(...pts.map((p) => p.x));
       const maxX = Math.max(...pts.map((p) => p.x));
       const minY = Math.min(...pts.map((p) => p.y));
@@ -61,6 +84,8 @@
     <div><span class="label">面積</span> <strong>{area.toFixed(2)}</strong></div>
   </header>
 
+  <button type="button" class="new-game" onclick={startNewGame}>開新局</button>
+
   <div class="zoom">
     <button type="button" aria-label="放大" onclick={() => board?.zoomBy(1.25)}>+</button>
     <button type="button" aria-label="縮小" onclick={() => board?.zoomBy(0.8)}>−</button>
@@ -76,7 +101,7 @@
       {/if}
     </p>
     <Tray
-      kinds={game.tileSet.kinds}
+      kinds={P2.kinds}
       {selected}
       colors={DEFAULT_PALETTE.tiles}
       {icons}
@@ -116,6 +141,20 @@
   }
   .label {
     color: var(--muted);
+  }
+  .new-game {
+    position: absolute;
+    top: 60px;
+    left: 16px;
+    padding: 8px 14px;
+    border: none;
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 2px 10px #0001;
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
   }
   .zoom {
     position: absolute;
