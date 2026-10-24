@@ -47,6 +47,7 @@ import {
   type TileKind,
 } from '../engine';
 import { Camera, type XY } from './camera';
+import { tileOutline } from './outline';
 import { DEFAULT_PALETTE, drawBoard, type Palette } from './renderer';
 import { REBUILD_DELAY, TileLayer } from './tile-layer';
 
@@ -82,7 +83,6 @@ interface Hover {
 export class Board {
   readonly camera = new Camera();
   palette: Palette = DEFAULT_PALETTE;
-  showArcs = true;
 
   private readonly ctx: CanvasRenderingContext2D;
   /** Off-screen cache of the confirmed tiling (panning and zooming redraw bitmaps, not tiles). */
@@ -306,7 +306,7 @@ export class Board {
     const hover = this.hover;
     const placement = this.previewPlacement();
     if (!hover || !placement || this.overPending) return;
-    if (insidePolygon(world, this.game.verticesOf(placement).map(toXY))) {
+    if (insidePolygon(world, this.outlineOf(placement.kind, this.game.verticesOf(placement)))) {
       this.game.place(placement, hover.pick.position);
       return;
     }
@@ -398,7 +398,7 @@ export class Board {
     this.canvas.setPointerCapture(e.pointerId);
     if (this.touches.size === 1) {
       const pending = this.game.pendingTile();
-      const onPending = !!pending && insidePolygon(this.camera.toWorld(p), pending.vertices.map(toXY));
+      const onPending = !!pending && insidePolygon(this.camera.toWorld(p), this.outlineOf(pending.kind, pending.vertices));
       this.gesture = onPending
         ? { type: 'pending', id: e.pointerId, start: p, dragging: false }
         : { type: 'pan', id: e.pointerId, start: p, last: p };
@@ -483,6 +483,11 @@ export class Board {
     return { placement: pending, pts: pending.vertices.map(toXY).map((q) => ({ x: q.x + b.x - a.x, y: q.y + b.y - a.y })) };
   }
 
+  /** A tile's drawn (curved) outline, for hit-testing what the player sees. */
+  private outlineOf(kind: TileKind, vertices: readonly Point[]): XY[] {
+    return tileOutline(this.game.tileSet.shapes[kind]!, vertices.map(toXY));
+  }
+
   private previewPlacement() {
     return this.hover ? (this.hover.pick.orientations[this.hover.index] ?? null) : null;
   }
@@ -502,7 +507,7 @@ export class Board {
       !!pending &&
       !!this.pointer &&
       !this.press?.dragging &&
-      insidePolygon(this.camera.toWorld(this.pointer), pending.vertices.map(toXY));
+      insidePolygon(this.camera.toWorld(this.pointer), this.outlineOf(pending.kind, pending.vertices));
     const over = this.game.status() === 'over';
     if (this.flow) {
       // the preview sits on the recommended spot, wherever the pointer is; keep the dialled orientation
@@ -537,7 +542,6 @@ export class Board {
     const placement = hover ? (hover.pick.orientations[hover.index] ?? null) : null;
     const g = this.gesture;
     const { redrawLater, redrawNow } = drawBoard(this.ctx, this.game, this.camera, this.dpr, this.palette, {
-      showArcs: this.showArcs,
       pendingHovered: this.overPending || (g?.type === 'pending' && !g.dragging),
       preview: placement && hover ? { placement, position: hover.pick.position } : null,
       ghost: this.ghost(),

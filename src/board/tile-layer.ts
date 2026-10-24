@@ -21,6 +21,7 @@
  */
 import { toXY, type Game, type PlacedTile } from '../engine';
 import type { Camera, XY } from './camera';
+import { OUTLINE_REACH } from './outline';
 
 /** Chunk side in device pixels. */
 const CHUNK = 256;
@@ -32,8 +33,8 @@ export const REBUILD_DELAY = 150;
 const FRAME_BUDGET = 6;
 /** Chunks kept beyond the visible ones (least recently drawn are dropped first). */
 const SPARE_CHUNKS = 64;
-/** World-space slack around a tile's box for outlines drawn past its edge. */
-const PAD = 0.1;
+/** World-space slack around a tile's box: the curved edges bulge past the corners, plus the stroke. */
+const PAD = OUTLINE_REACH + 0.1;
 
 /** Where world points land on a canvas (the board camera, or a chunk). */
 export interface View {

@@ -4,7 +4,7 @@
  *
  * A separate small database from the game autosave, so neither schema has to
  * bump the other's version: `penrose-tiling-settings` v1, one key-value store
- * `settings`, key 'display' → { colors, showArcs }.
+ * `settings`, key 'display' → { colors } (older versions also saved a showArcs flag; reading drops it).
  * The language choice stays in localStorage (see src/i18n): it must be known
  * synchronously before the first render.
  */
@@ -41,7 +41,7 @@ export async function loadSettings(): Promise<Settings> {
 export async function saveSettings(settings: Settings): Promise<void> {
   try {
     const db = await openDb();
-    const value: Settings = { colors: { ...settings.colors }, showArcs: settings.showArcs };
+    const value: Settings = { colors: { ...settings.colors } };
     await req(db.transaction(STORE, 'readwrite').objectStore(STORE).put(value, KEY));
   } catch (err) {
     console.warn('Saving settings failed', err);

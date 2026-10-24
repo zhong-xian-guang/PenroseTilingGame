@@ -9,20 +9,19 @@
    */
   import { toXY, type PlacedTile, type Point, type ReplayFrame } from '../engine';
   import { Camera } from '../board/camera';
+  import { tileOutline } from '../board/outline';
   import { DEFAULT_PALETTE, drawBoard, type Palette } from '../board/renderer';
   import { t } from '../i18n/index.svelte';
 
   let {
     frames,
     palette = DEFAULT_PALETTE,
-    showArcs = true,
     index = $bindable(0),
     doomedStep = null,
     finalDeadEnds = [],
   }: {
     frames: readonly ReplayFrame[];
     palette?: Palette;
-    showArcs?: boolean;
     /** The frame shown. */
     index?: number;
     /** Step (= frame index) the game was doomed by at the latest, to mark. */
@@ -92,7 +91,7 @@
     if (bounds) camera.fit(bounds.min, bounds.max, 1);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    drawBoard(ctx, frame, camera, dpr, palette, { showArcs, pendingHovered: false, preview: null });
+    drawBoard(ctx, frame, camera, dpr, palette, { pendingHovered: false, preview: null });
     drawMarks(ctx, camera, frame);
   });
 
@@ -118,8 +117,8 @@
       ctx.lineWidth = Math.max(3, camera.scale * 0.08);
       ctx.lineJoin = 'round';
       ctx.beginPath();
-      tile.vertices.forEach((v, i) => {
-        const s = camera.toScreen(toXY(v));
+      tileOutline(frame.tileSet.shapes[tile.kind]!, tile.vertices.map(toXY)).forEach((v, i) => {
+        const s = camera.toScreen(v);
         if (i === 0) ctx.moveTo(s.x, s.y);
         else ctx.lineTo(s.x, s.y);
       });

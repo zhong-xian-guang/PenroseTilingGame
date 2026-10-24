@@ -10,7 +10,7 @@ import {
 
 const HEX = /^#[0-9a-f]{6}$/;
 
-/** Euclidean RGB distance, to check the two arc families do not look alike. */
+/** Euclidean RGB distance, to check two colours do not look alike. */
 const rgbDistance = (a: string, b: string) => {
   const p = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const [x, y] = [p(a), p(b)];
@@ -37,16 +37,6 @@ describe('presets', () => {
     }
   });
 
-  it.each(PRESETS.map((p) => [p.id, p] as const))('%s: Conway arcs stand out on both tiles (>= 3:1)', (_, p) => {
-    const palette = derivePalette(p.colors);
-    for (const arc of [palette.arcA, palette.arcB]) {
-      expect(arc).toMatch(HEX);
-      expect(contrastRatio(arc, p.colors.kite)).toBeGreaterThanOrEqual(3);
-      expect(contrastRatio(arc, p.colors.dart)).toBeGreaterThanOrEqual(3);
-    }
-    expect(rgbDistance(palette.arcA, palette.arcB)).toBeGreaterThan(80);
-  });
-
   it.each(PRESETS.map((p) => [p.id, p] as const))('%s: tiles and background are distinguishable', (_, p) => {
     expect(rgbDistance(p.colors.kite, p.colors.dart)).toBeGreaterThan(60);
     const palette = derivePalette(p.colors);
@@ -61,17 +51,12 @@ describe('derivePalette', () => {
     const palette = derivePalette(colors);
     expect(palette.background).toBe('#808080');
     expect(palette.tiles).toEqual({ kite: '#000000', dart: '#ffffff' });
-    for (const c of [palette.arcA, palette.arcB, palette.outline]) expect(c).toMatch(HEX);
+    expect(palette.outline).toMatch(HEX);
   });
 
   it('is deterministic', () => {
     const colors = { kite: '#123456', dart: '#abcdef', background: '#fafafa' };
     expect(derivePalette(colors)).toEqual(derivePalette(colors));
-  });
-
-  it('switches arcs to light colours on dark tiles', () => {
-    const palette = derivePalette({ kite: '#101820', dart: '#202a10', background: '#000000' });
-    expect(contrastRatio(palette.arcA, '#000000')).toBeGreaterThan(contrastRatio(palette.arcA, '#ffffff'));
   });
 });
 
@@ -79,21 +64,19 @@ describe('normalizeSettings (reading saved settings)', () => {
   it('returns the defaults for missing or garbage data', () => {
     expect(normalizeSettings(undefined)).toEqual(DEFAULT_SETTINGS);
     expect(normalizeSettings('nonsense')).toEqual(DEFAULT_SETTINGS);
-    expect(normalizeSettings({ colors: 5, showArcs: 'yes' })).toEqual(DEFAULT_SETTINGS);
+    expect(normalizeSettings({ colors: 5 })).toEqual(DEFAULT_SETTINGS);
   });
 
-  it('defaults to showing the arcs', () => {
-    expect(DEFAULT_SETTINGS.showArcs).toBe(true);
+  it('drops the showArcs flag that settings saved by older versions still carry', () => {
+    expect(normalizeSettings({ colors: PRESETS[1]!.colors, showArcs: false })).toEqual({ colors: PRESETS[1]!.colors });
   });
 
   it('keeps valid fields and replaces only invalid ones', () => {
     const s = normalizeSettings({
       colors: { kite: '#ABCDEF', dart: 'red', background: '#112233' },
-      showArcs: false,
     });
     expect(s).toEqual({
       colors: { kite: '#abcdef', dart: DEFAULT_SETTINGS.colors.dart, background: '#112233' },
-      showArcs: false,
     });
   });
 

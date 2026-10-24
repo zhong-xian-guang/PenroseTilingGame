@@ -1,6 +1,6 @@
 /**
  * Colour settings: the player's chosen colours (kite, dart, background), the
- * presets, and the colours derived from them (Conway arcs, tile outline).
+ * presets, and the colours derived from them (the tile outline).
  * Pure logic, no DOM: the board merges the result into its Palette.
  */
 
@@ -12,8 +12,6 @@ export interface ColorChoice {
 
 export interface Settings {
   colors: ColorChoice;
-  /** Draw the Conway arcs (the matching marks). On by default. */
-  showArcs: boolean;
 }
 
 export interface Preset {
@@ -31,15 +29,13 @@ export const PRESETS: readonly Preset[] = [
   { id: 'mono', colors: { kite: '#d4d4d4', dart: '#a0a0a0', background: '#f4f4f4' } },
 ];
 
-export const DEFAULT_SETTINGS: Settings = { colors: { ...PRESETS[0]!.colors }, showArcs: true };
+export const DEFAULT_SETTINGS: Settings = { colors: { ...PRESETS[0]!.colors } };
 
 /** The colours derived from a ColorChoice; the renderer's Palette is a superset. */
 export interface DerivedColors {
   background: string;
   tiles: { kite: string; dart: string };
   outline: string;
-  arcA: string;
-  arcB: string;
 }
 
 type RGB = [number, number, number];
@@ -57,8 +53,6 @@ const toRgb = (hex: string): RGB => {
   const h = normalizeHex(hex) ?? '#000000';
   return [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as RGB;
 };
-const toHex = (rgb: RGB): string =>
-  `#${rgb.map((c) => Math.round(Math.min(255, Math.max(0, c))).toString(16).padStart(2, '0')).join('')}`;
 
 /** WCAG 2 relative luminance. */
 const luminance = (rgb: RGB): number => {
@@ -76,44 +70,6 @@ export function contrastRatio(a: string, b: string): number {
   return ratio(luminance(toRgb(a)), luminance(toRgb(b)));
 }
 
-const hslToRgb = (h: number, s: number, l: number): RGB => {
-  const k = (n: number) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  return [f(0) * 255, f(8) * 255, f(4) * 255];
-};
-
-/** Hue families for the two arc kinds: A warm (red/orange), B cool (blue). */
-const ARC_HUES = { A: [0, 10, 20, 30], B: [200, 210, 220, 230] } as const;
-const SATURATIONS = [0.9, 0.75, 0.6, 0.45];
-/** Contrast above this is "enough"; beyond it we prefer colourful, mid-light arcs. */
-const ENOUGH = 4;
-
-/**
- * The most visible colour of a hue family against all `against` colours:
- * maximise the worst-case contrast (capped at ENOUGH), then saturation, then
- * a lightness close to the middle so the hue still shows.
- */
-function pickArc(hues: readonly number[], against: RGB[]): string {
-  const lums = against.map(luminance);
-  let best: { key: [number, number, number]; rgb: RGB } | null = null;
-  for (const h of hues) {
-    for (const s of SATURATIONS) {
-      for (let i = 0; i <= 45; i++) {
-        const l = 0.05 + i * 0.02;
-        const rgb = hslToRgb(h, s, l).map(Math.round) as RGB;
-        const lum = luminance(rgb);
-        const worst = Math.min(...lums.map((x) => ratio(lum, x)));
-        const key: [number, number, number] = [Math.min(worst, ENOUGH), s, -Math.abs(l - 0.5)];
-        if (!best || key[0] > best.key[0] || (key[0] === best.key[0] && (key[1] > best.key[1] || (key[1] === best.key[1] && key[2] > best.key[2])))) {
-          best = { key, rgb };
-        }
-      }
-    }
-  }
-  return toHex(best!.rgb);
-}
-
 /** Dark or light tile outline, whichever reads better on both tile colours. */
 function pickOutline(tiles: RGB[]): string {
   const options = ['#2b3440', '#f2f2f2'];
@@ -121,15 +77,13 @@ function pickOutline(tiles: RGB[]): string {
   return score(options[0]!) >= score(options[1]!) ? options[0]! : options[1]!;
 }
 
-/** Board colours for a colour choice: arcs and outline are derived to contrast with the tiles. */
+/** Board colours for a colour choice: the outline is derived to contrast with the tiles. */
 export function derivePalette(colors: ColorChoice): DerivedColors {
   const tiles = [toRgb(colors.kite), toRgb(colors.dart)];
   return {
     background: colors.background,
     tiles: { kite: colors.kite, dart: colors.dart },
     outline: pickOutline(tiles),
-    arcA: pickArc(ARC_HUES.A, tiles),
-    arcB: pickArc(ARC_HUES.B, tiles),
   };
 }
 
@@ -144,7 +98,6 @@ export function normalizeSettings(raw: unknown): Settings {
       dart: normalizeHex(colors.dart) ?? d.colors.dart,
       background: normalizeHex(colors.background) ?? d.colors.background,
     },
-    showArcs: typeof obj.showArcs === 'boolean' ? obj.showArcs : d.showArcs,
   };
 }
 
