@@ -8,7 +8,7 @@
  * shared edge in opposite directions, so a legal glue meets out with in along the whole edge, and a reversed
  * tile meets out with out. Each corner has one outward and one inward edge, so the corner angles stay.
  */
-import type { TileShape } from '../engine';
+import { PHI, type TileShape } from '../engine';
 import type { XY } from './camera';
 
 /** Arc height as a fraction of the edge length. */
@@ -16,7 +16,7 @@ const SAGITTA = 0.12;
 /** Straight segments per edge. */
 const STEPS = 16;
 /** How far (world units) an outline reaches past its tile's corners: the arc height of the longest edge (φ). */
-export const OUTLINE_REACH = SAGITTA * 1.62;
+export const OUTLINE_REACH = SAGITTA * PHI;
 
 /** Offsets (along the edge, to its left) of the arc's inner points, for an edge of length `len`. */
 function arcOffsets(len: number): [number, number][] {

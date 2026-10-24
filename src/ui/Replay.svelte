@@ -9,6 +9,7 @@
    */
   import { toXY, type PlacedTile, type Point, type ReplayFrame } from '../engine';
   import { Camera } from '../board/camera';
+  import { tileOutline } from '../board/outline';
   import { DEFAULT_PALETTE, drawBoard, type Palette } from '../board/renderer';
   import { t } from '../i18n/index.svelte';
 
@@ -116,8 +117,8 @@
       ctx.lineWidth = Math.max(3, camera.scale * 0.08);
       ctx.lineJoin = 'round';
       ctx.beginPath();
-      tile.vertices.forEach((v, i) => {
-        const s = camera.toScreen(toXY(v));
+      tileOutline(frame.tileSet.shapes[tile.kind]!, tile.vertices.map(toXY)).forEach((v, i) => {
+        const s = camera.toScreen(v);
         if (i === 0) ctx.moveTo(s.x, s.y);
         else ctx.lineTo(s.x, s.y);
       });

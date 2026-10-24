@@ -15,6 +15,7 @@
     type TileKind,
   } from '../engine';
   import { Board } from '../board/board';
+  import { tileOutline } from '../board/outline';
   import { DEFAULT_PALETTE, type Palette } from '../board/renderer';
   import { derivePalette } from '../settings/palette';
   import { displaySettings } from '../settings/store.svelte';
@@ -22,7 +23,6 @@
   import { lookupBest, submitScore, type BestComparison } from '../storage/best';
   import { backtraceInBackground } from './backtrace';
   import Tray from './Tray.svelte';
-  import { tileOutline } from '../board/outline';
   import Menu from './Menu.svelte';
   import GameOverDialog from './GameOverDialog.svelte';
   import AnalysisPage from './AnalysisPage.svelte';

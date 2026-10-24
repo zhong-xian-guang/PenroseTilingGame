@@ -2,7 +2,7 @@
  * Canvas 2D drawing of the board. Pure presentation: it reads the game
  * through its query interface and never decides anything about the rules.
  */
-import { samePoint, toXY, type Game, type Placement, type Point, type TileKind, type TileShape } from '../engine';
+import { samePoint, toXY, type Game, type Placement, type Point, type TileKind } from '../engine';
 import { DEFAULT_SETTINGS, derivePalette } from '../settings/palette';
 import type { Camera, XY } from './camera';
 import { edgeArc, tileOutline } from './outline';
@@ -133,7 +133,7 @@ export function drawBoard(
     const pts = pending.vertices.map(toXY);
     drawTile(ctx, game, camera, palette, pending, pts, 0.8);
     ctx.save();
-    traceTile(ctx, camera, game.tileSet.shapes[pending.kind]!, pts);
+    traceTile(ctx, camera, game, pending.kind, pts);
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(scene.pendingHovered ? 3.5 : 2.5, camera.scale * (scene.pendingHovered ? 0.1 : 0.07));
     ctx.strokeStyle = palette.pending;
@@ -163,7 +163,7 @@ export function drawBoard(
     const pts = game.verticesOf(scene.preview.placement).map(toXY);
     ctx.save();
     drawTile(ctx, game, camera, palette, scene.preview.placement, pts, 0.55);
-    traceTile(ctx, camera, game.tileSet.shapes[scene.preview.placement.kind]!, pts);
+    traceTile(ctx, camera, game, scene.preview.placement.kind, pts);
     ctx.setLineDash([6, 4]);
     ctx.lineWidth = 2;
     ctx.strokeStyle = palette.outline;
@@ -180,7 +180,7 @@ export function drawBoard(
   if (scene.ghost) {
     ctx.save();
     drawTile(ctx, game, camera, palette, scene.ghost.placement, scene.ghost.pts, 0.4);
-    traceTile(ctx, camera, game.tileSet.shapes[scene.ghost.placement.kind]!, scene.ghost.pts);
+    traceTile(ctx, camera, game, scene.ghost.placement.kind, scene.ghost.pts);
     ctx.setLineDash([3, 4]);
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = palette.outline;
@@ -242,8 +242,8 @@ function tracePath(ctx: CanvasRenderingContext2D, camera: View, pts: XY[], close
 }
 
 /** Traces a tile's curved outline (see outline.ts). */
-const traceTile = (ctx: CanvasRenderingContext2D, camera: View, shape: TileShape, pts: XY[]) =>
-  tracePath(ctx, camera, tileOutline(shape, pts));
+const traceTile = (ctx: CanvasRenderingContext2D, camera: View, game: BoardView, kind: TileKind, pts: XY[]) =>
+  tracePath(ctx, camera, tileOutline(game.tileSet.shapes[kind]!, pts));
 
 function drawTile(
   ctx: CanvasRenderingContext2D,
@@ -256,7 +256,7 @@ function drawTile(
 ): void {
   ctx.save();
   ctx.globalAlpha = alpha;
-  traceTile(ctx, camera, game.tileSet.shapes[placement.kind]!, pts);
+  traceTile(ctx, camera, game, placement.kind, pts);
   ctx.fillStyle = palette.tiles[placement.kind] ?? '#ccc';
   ctx.fill();
   ctx.lineJoin = 'round';

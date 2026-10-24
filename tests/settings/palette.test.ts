@@ -58,7 +58,6 @@ describe('derivePalette', () => {
     const colors = { kite: '#123456', dart: '#abcdef', background: '#fafafa' };
     expect(derivePalette(colors)).toEqual(derivePalette(colors));
   });
-
 });
 
 describe('normalizeSettings (reading saved settings)', () => {
