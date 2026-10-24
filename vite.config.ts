@@ -15,6 +15,8 @@ export default defineConfig(({ mode }) => ({
       // 'prompt' without ever prompting: a new version installs in the background and waits; it takes over
       // only once every window of the app is closed, so a running game is never reloaded underneath the player.
       // The next launch then runs the new version.
+      // No service worker in the bench build: its navigation fallback would answer /bench.html?… with index.html.
+      disable: mode === 'bench',
       registerType: 'prompt',
       injectRegister: 'script-defer',
       includeAssets: ['favicon.ico', 'icon.svg', 'apple-touch-icon-180x180.png'],

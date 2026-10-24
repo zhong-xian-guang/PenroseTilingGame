@@ -29,4 +29,14 @@ body,
 
 body {
   -webkit-tap-highlight-color: transparent;
+  /* A long press on the HUD, hint or a button must not select its text or open the selection menu
+     (seen on Android Chrome). Dialog text stays selectable. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+dialog :is(p, pre, h2, h3, dd, dt, li) {
+  user-select: text;
+  -webkit-user-select: text;
 }

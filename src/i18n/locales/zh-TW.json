@@ -13,6 +13,7 @@
   "hint.flowTouch": "心流模式：拼塊吸附在藍圈的推薦位置 · 點盤面換方向 · 點預覽放下 · 點預放換方向",
   "hint.flowNone": "附近沒有可放的凹處",
   "hint.flowNoFit": "這種拼塊放不進推薦位置，換另一種試試",
+  "menu.label": "選單",
   "mode.label": "遊玩模式",
   "mode.free": "自由",
   "mode.flow": "心流",

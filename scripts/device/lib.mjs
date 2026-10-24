@@ -1,6 +1,6 @@
 // Shared helpers for the Android real-device scripts: adb, Chrome DevTools Protocol (CDP) over
 // `adb forward`, screenshots, and CSS-px <-> device-px mapping. See README.md in this folder.
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -50,8 +50,13 @@ export function setupForwards() {
   adb('reverse', `tcp:${APP_PORT}`, `tcp:${APP_PORT}`);
 }
 
+/** Chrome's DevTools targets; [] while Chrome is not running. */
 export async function cdpTargets() {
-  return (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
+  try {
+    return await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
+  } catch {
+    return [];
+  }
 }
 
 /** Opens `url` in a new Chrome tab on the phone (or reuses a tab already on it) and connects to it. */
@@ -66,7 +71,9 @@ export async function openPage(url = APP_URL, { reuse = true } = {}) {
     }
     if (!target) throw new Error(`no Chrome tab on ${url}`);
   }
+  shell('am start -n com.android.chrome/com.google.android.apps.chrome.Main >/dev/null'); // Chrome to the front
   await fetch(`http://127.0.0.1:${CDP_PORT}/json/activate/${target.id}`);
+  await sleep(800);
   const page = await connect(target.webSocketDebuggerUrl);
   await page.send('Page.bringToFront');
   return page;
@@ -129,26 +136,82 @@ export async function calibrate(page, at = null) {
 /** CSS px (client coordinates) -> device px for `adb shell input`. */
 export const toDevice = (cal, [x, y]) => [Math.round(cal.left + x * cal.dpr), Math.round(cal.top + y * cal.dpr)];
 
-/** Real system touch: finger down, moves, up, through `adb shell input event` (one adb call per event). */
-export const finger = {
-  down: (p) => shell(`input touchscreen event DOWN ${p[0]} ${p[1]}`),
-  move: (p) => shell(`input touchscreen event MOVE ${p[0]} ${p[1]}`),
-  up: (p) => shell(`input touchscreen event UP ${p[0]} ${p[1]}`),
-};
+// ---- real touches ----
+// Only `input tap` and `input swipe` reach Chrome on the test phone (ASUS, Android 10): its
+// `input [touchscreen] event DOWN|MOVE|UP` runs but delivers nothing, and `sendevent` into the
+// touchscreen node is refused by SELinux. So a one-finger gesture is a straight-line swipe (the finger
+// lifts at its end), observed while it runs; anything a straight line cannot do (multi-touch, a path
+// that turns back) uses CDP Input.dispatchTouchEvent instead.
 
-/** Several MOVE events from a to b, sent in one adb call. */
-export function moveAlong(a, b, steps = 8) {
-  const cmds = [];
-  for (let s = 1; s <= steps; s++) {
-    const x = Math.round(a[0] + ((b[0] - a[0]) * s) / steps);
-    const y = Math.round(a[1] + ((b[1] - a[1]) * s) / steps);
-    cmds.push(`input touchscreen event MOVE ${x} ${y}`);
+/** Tap at p (device px). */
+export const tap = (p) => shell(`input tap ${Math.round(p[0])} ${Math.round(p[1])}`);
+
+/** Long press: a zero-length swipe held for `ms`. */
+export const longPress = (p, ms = 1200) => shell(`input swipe ${p[0]} ${p[1]} ${p[0]} ${p[1]} ${ms}`);
+
+/**
+ * Swipe from a to b (device px) over `ms`, then lift. `during(t)` is awaited at about t ms into the
+ * swipe so the page can be inspected mid-gesture (adb latency makes the timing approximate).
+ */
+export async function swipe(a, b, ms, during = null, at = ms * 0.9) {
+  const child = spawn(ADB, ['shell', `input swipe ${a[0]} ${a[1]} ${b[0]} ${b[1]} ${ms}`]);
+  const done = new Promise((r) => child.on('exit', r));
+  let seen;
+  if (during) {
+    await sleep(at);
+    seen = await during();
   }
-  shell(cmds.join(' && '));
+  await done;
+  return seen;
 }
+
+/** CDP touch: one or two fingers along given CSS-px paths (arrays of [x,y]), `frameMs` apart. */
+export async function cdpTouch(page, paths, frameMs = 16) {
+  const n = Math.max(...paths.map((p) => p.length));
+  const pts = (i) => paths.map((p, id) => ({ x: p[Math.min(i, p.length - 1)][0], y: p[Math.min(i, p.length - 1)][1], id }));
+  await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(0) });
+  for (let i = 1; i < n; i++) {
+    await sleep(frameMs);
+    await page.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(i) });
+  }
+  await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+/** Points from a to b in `steps` steps (inclusive of a). */
+export const line = (a, b, steps = 10) =>
+  Array.from({ length: steps + 1 }, (_, s) => [a[0] + ((b[0] - a[0]) * s) / steps, a[1] + ((b[1] - a[1]) * s) / steps]);
 
 /** Rect of the first element matching `selector`, in CSS px. */
 export async function rect(page, selector) {
   return JSON.parse(await page.ev(`JSON.stringify(document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect() ?? null)`));
 }
 export const centre = (r) => [r.x + r.width / 2, r.y + r.height / 2];
+
+// ---- Android UI (uiautomator) ----
+
+/** The current screen's UI nodes: {text, desc, id, pkg, bounds:[x0,y0,x1,y1]}. */
+export function uiNodes() {
+  const xml = shell('uiautomator dump /sdcard/ptg-ui.xml >/dev/null; cat /sdcard/ptg-ui.xml; rm -f /sdcard/ptg-ui.xml');
+  const nodes = [];
+  for (const m of xml.matchAll(/<node [^>]*>/g)) {
+    const a = (k) => new RegExp(`${k}="([^"]*)"`).exec(m[0])?.[1] ?? '';
+    const b = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(m[0]);
+    nodes.push({ text: a('text'), desc: a('content-desc'), id: a('resource-id'), pkg: a('package'), bounds: b ? b.slice(1).map(Number) : null });
+  }
+  return nodes;
+}
+/** First node whose text or content description matches `re`. */
+export const findNode = (re, nodes = uiNodes()) => nodes.find((n) => re.test(n.text) || re.test(n.desc)) ?? null;
+/** Taps the centre of a node. */
+export const tapNode = (n) => tap([(n.bounds[0] + n.bounds[2]) / 2, (n.bounds[1] + n.bounds[3]) / 2]);
+/** Waits up to `ms` for a node matching `re`. */
+export async function waitNode(re, ms = 8000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const n = findNode(re);
+    if (n) return n;
+    await sleep(500);
+  }
+  return null;
+}
+/** The activity in front (package/class). */
+export const topActivity = () => /mResumedActivity: ActivityRecord\{\S+ \S+ (\S+)/.exec(shell('dumpsys activity activities | grep mResumedActivity'))?.[1] ?? null;

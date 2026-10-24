@@ -235,7 +235,9 @@ async function run() {
   }
   const ms = (xs: number[]) => {
     const s = [...xs].sort((a, b) => a - b);
-    return { n: s.length, median: round(quantile(s, 0.5)), p90: round(quantile(s, 0.9)), max: round(s[s.length - 1]!) };
+    const max = s[s.length - 1]!;
+    // maxAt: which place (0-based) was slowest; over: how many took longer than a 60 Hz frame
+    return { n: s.length, median: round(quantile(s, 0.5)), p90: round(quantile(s, 0.9)), max: round(max), maxAt: xs.indexOf(max), over16ms: xs.filter((x) => x > 1000 / 60).length };
   };
 
   const result = {

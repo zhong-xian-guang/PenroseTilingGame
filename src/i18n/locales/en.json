@@ -13,6 +13,7 @@
   "hint.flowTouch": "Flow mode: the tile snaps to the suggested spot (blue ring) · Tap the board to rotate · Tap the preview to place",
   "hint.flowNone": "No open spot to suggest",
   "hint.flowNoFit": "This tile does not fit the suggested spot; try the other one",
+  "menu.label": "Menu",
   "mode.label": "Play mode",
   "mode.free": "Free",
   "mode.flow": "Flow",

@@ -11,6 +11,30 @@
 - [x] 點擊預放會循環切換它的合法方向
 - [x] 把預放拖回托盤會移除它
 - [x] 在空白盤面上單指拖曳是平移，雙指是縮放，都不會誤觸放置
-- [ ] 在實機（iOS Safari 與 Android Chrome）上手動驗證過
+- [x] 在 Android Chrome 實機上驗證過（自動化，見下方 Comments）
+- [ ] 在 iOS Safari 實機上驗證過（待發版前人工驗證）
 
-**Notes:** 前五項以 headless Edge 的 CDP 觸控模擬（390×844、mobile）驗證過：拖出、吸附、放下、點擊換向、拖回托盤移除、平移、雙指縮放、遠處放開與拖回托盤都不放置。實機驗證尚未做，需要人手動測試。觸控裝置（pointer: coarse）上的提示文字改為觸控說明（`hint.touch`）。
+**Notes:** 前五項以 headless Edge 的 CDP 觸控模擬（390×844、mobile）驗證過：拖出、吸附、放下、點擊換向、拖回托盤移除、平移、雙指縮放、遠處放開與拖回托盤都不放置。觸控裝置（pointer: coarse）上的提示文字改為觸控說明（`hint.touch`）。
+
+## Comments
+
+**Android 實機（2026-10-24）**：ASUS ZenFone 5Z（Snapdragon 845，Android 10，Chrome 147，375×647 CSS px，DPR 2.875）。
+腳本 `scripts/device/touch.mjs`（`npm run device:touch`，說明見 `scripts/device/README.md`），12 項全部通過：
+
+- 單指從托盤拖出（真實系統觸控 `adb shell input swipe`）：拖曳途中托盤選中風箏，預覽畫在手指上方並吸附到邊界上的候選放置（截圖確認）；放開後成為預放。
+- 點擊預放（真實 tap）：換到下一個合法方向。
+- 把預放拖到托盤上：托盤出現移除提示框（`.removing`），放開後預放被移除。
+- 遠處沒有候選放置時放開、在托盤內放開：都不放置。「拖出到鋪砌上再拖回托盤」需要折返路徑，直線 swipe 做不到，這一段改用 CDP 觸控事件。
+- 空白盤面單指拖曳：平移 (−80, −60) CSS px，與手指位移一致，不放置。
+- 雙指縮放（CDP 觸控事件，adb 沒有多指）：鋪砌寬度 146 → 72 → 146 px，不放置。
+- 心流模式：從托盤拖出、在盤面任意處放開，就放在推薦位置成為預放。
+- 探查：長按提示文字、HUD、選單按鈕、托盤、盤面都沒有文字選取或選單；雙擊盤面、提示、HUD 不會放大頁面（`visualViewport.scale` 維持 1）；從頂端往下拉不會觸發下拉重新整理。
+
+這台手機的 `input touchscreen event DOWN/MOVE/UP` 送不到 Chrome，`sendevent` 又被 SELinux 擋下，所以單指手勢都是直線 swipe，在 swipe 進行中以 CDP 讀取狀態與截圖。
+
+**實機上發現並修正的兩個問題：**
+
+1. 長按 HUD、提示文字或按鈕會選取文字並跳出 Chrome 的「複製／分享／全部選取」工具列。修正：`global.css` 對 body 設 `user-select: none` 與 `-webkit-touch-callout: none`，對話框裡的內文仍可選取。
+2. 手機寬度（375 px）下，右上的選單按鈕列（English／設定／最近棋譜／開啟棋譜／關於）換行後蓋住左上的 HUD，「面積」被擋住，長按 HUD 實際上是按到「English」。改成直排會蓋到盤面，雙指縮放時手指會按到選單按鈕。修正：寬度 ≤ 720 px 時，選單收進縮放按鈕下方的 ☰ 按鈕（`Menu.svelte`，新 i18n 鍵 `menu.label`），點一下展開成直排，選一項或點外面就收合。對話框是按鈕的兄弟元素，所以選單收合時對話框仍會顯示。
+
+**iOS 待做（發版前人工）：** 以上同一套流程；另外要特別看 Safari 的長按放大鏡與文字選取、雙擊縮放、橡皮筋回彈、從邊緣滑動返回，以及 `touch-action: none` 是否擋住頁面縮放。
