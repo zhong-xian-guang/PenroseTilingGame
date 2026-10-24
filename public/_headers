@@ -1,0 +1,7 @@
+# Cloudflare Pages response headers (copied into dist/ by Vite).
+# Everything else keeps Pages' default `max-age=0, must-revalidate`, which the service worker (sw.js),
+# index.html and the manifest rely on to pick up a new version.
+
+# Vite's content-hashed bundles and fonts never change under the same name.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
