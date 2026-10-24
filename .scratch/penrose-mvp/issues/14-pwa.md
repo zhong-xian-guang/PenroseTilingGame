@@ -10,7 +10,7 @@
 - [x] 第一次載入後，離線狀態下可以開啟並完整遊玩
 - [x] 字型子集被預先快取
 - [x] 在 Android Chrome 上可以加入主畫面，並以 App 形式開啟（自動化實機驗證，見 Comments）
-- [ ] 在 iOS Safari 上可以加入主畫面，並以 App 形式開啟（待發版前人工驗證）
+- [ ] ~~在 iOS Safari 上可以加入主畫面，並以 App 形式開啟~~（wontfix：使用者沒有 iOS 裝置，2026-10-24 決定 MVP 不驗證 iOS）
 - [x] 推出新版本時，玩家會得到更新，而進行中的局不會遺失
 
 ## Notes
@@ -18,7 +18,7 @@
 - 驗證方式：`npm run build` + `vite preview`，以 headless Edge + CDP 檢查 manifest（name、standalone、theme_color、4 個圖示）、service worker 啟用、8 個 woff2 在 precache 中；切到離線後重新載入，App、Canvas、按鈕與字型都正常，深層路徑也回落到 index.html。
 - 更新策略：`registerType: 'prompt'` 但不跳提示。新版本在背景安裝並等待，等 App 所有視窗都關閉後才接手，下次開啟就是新版。進行中的局永遠不會被強制重新載入。若之後想要「有新版本」提示，可改用 `virtual:pwa-register` 的 `onNeedRefresh`，並在 07 自動存檔之後再 reload。
 - 圖示：`public/icon.svg`（P2 太陽）為來源，`npm run icons` 以 @vite-pwa/assets-generator 產生 PNG/ICO，產物已提交。
-- 尚未完成：iOS Safari 實機加入主畫面需人工驗證（需要 HTTPS 部署）。Android 已在實機上驗證，見下方。
+- iOS Safari 不驗證（使用者沒有 iOS 裝置，決定 MVP 不驗證）。Android 已在實機上驗證，見下方。
 
 ## Comments
 
@@ -32,4 +32,4 @@
 - 離線：移除 adb reverse（伺服器無法連線），以 `svc wifi disable` 與 `svc data disable` 關閉網路（`Active default network: none`，`navigator.onLine === false`），再從圖示冷啟動：由 service worker 接手，Canvas、托盤與兩個字型都正常載入；用真實 swipe 從托盤拖出風箏，成功放上預放，可以遊玩。之後 Wi-Fi 與行動數據都恢復開啟，飛航模式維持關閉，adb reverse 也已恢復。
 - 手機上留著測試安裝的 Penrose 捷徑，在主畫面預設頁的左邊一頁。重跑安裝時產生的兩個重複捷徑已移除。
 
-**iOS 待做（發版前人工）：** 要部署到 HTTPS。用 Safari 的「分享 > 加入主畫面」，從圖示開啟，確認是 standalone、狀態列與瀏海區域（`apple-mobile-web-app-status-bar-style`）的顯示，以及離線後重開能玩。
+**iOS（不驗證，見上方 wontfix；日後若有裝置可參考）：** 要部署到 HTTPS。用 Safari 的「分享 > 加入主畫面」，從圖示開啟，確認是 standalone、狀態列與瀏海區域（`apple-mobile-web-app-status-bar-style`）的顯示，以及離線後重開能玩。
