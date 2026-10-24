@@ -2,7 +2,7 @@
 
 正式站以 **Cloudflare Workers（靜態資源）+ Workers Builds 的 Git 整合**部署：Cloudflare 連上 GitHub repo 後自行建置並上傳，不經 GitHub Actions、repo 裡也沒有 API token。沒有 Worker 程式，只有 `dist/` 的靜態檔。
 
-- push 到 `main` → 建置並更新正式站（`penrosetilinggame.<帳號子網域>.workers.dev`）
+- push 到 `main` → 建置並更新正式站：<https://penrosetilinggame.kasim1987.workers.dev>
 - 其他分支 → 預設只上傳新版本、不影響正式站；可在 Worker 的 **Settings → Builds** 調整非正式分支的行為與預覽網址
 - commit 訊息含 `[skip ci]` 可跳過該次建置
 
