@@ -27,4 +27,5 @@
 
 **Android 實機（2026-10-24）**：ZenFone 5Z，production build（`vite build` + `vite preview`，`adb reverse tcp:4173`），`npm run device:touch` 12 項全部通過；截圖確認弧形外框、待定拼塊的紅框與托盤圖示都正確。第一次執行時「心流模式：拖出拼塊放下」失敗，原因是那局隨機開局的推薦位置放不下風箏（畫面提示「這種拼塊放不進推薦位置」），測試固定拖風箏所以沒放下；重跑一次通過。這是測試腳本依賴隨機開局的既有問題，與本票無關。
 另：`npm run build` 的字型子集化步驟（`scripts/subset_fonts.py`）在這台電腦上讀 `.cache/fonts/*.zip` 時路徑中文編碼出錯而失敗，與本票無關；本票沒有新增文字，沿用已提交的字型檔，直接 `vite build`。
+更正（同日）：移除弧線設定的字串改變了介面字元集，已提交的字型子集因此不再相符，Cloudflare 建置會需要自己用 Python 子集化。已修正 `scripts/subset_fonts.py` 改以 UTF-8 讀取 stdin 的工作參數，重新產生 `src/fonts/` 的子集（367 字）；`npm run build` 現在顯示 `subsets up to date`。
 
