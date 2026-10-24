@@ -10,7 +10,8 @@
  *
  * There is deliberately no manual save or load.
  */
-import { RECORD_VERSION, replayRecord, type Game, type GameRecord, type RecordStep } from '../engine';
+import { RECORD_VERSION, replayRecord, type Game, type GameRecord, type PlayMode, type RecordStep } from '../engine';
+import { done, req } from './idb';
 
 const DB_NAME = 'penrose-tiling';
 const DB_VERSION = 1;
@@ -32,19 +33,20 @@ interface StepRow {
 interface PendingRow {
   gameId: string;
   steps: RecordStep[];
+  /**
+   * The play mode at the last save. A mode switch changes no record step, so
+   * it is kept here for resuming (optional: rows written before it existed
+   * have none, and the replayed mode stands).
+   */
+  mode?: PlayMode;
 }
 
-const req = <T>(r: IDBRequest<T>): Promise<T> =>
-  new Promise((resolve, reject) => {
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
-const done = (tx: IDBTransaction): Promise<void> =>
-  new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
+/** A saved game, as listed by `recentGames`. */
+export interface SavedGame {
+  readonly id: string;
+  readonly startedAt: number;
+  readonly record: GameRecord;
+}
 
 /** The app's database (also used by best.ts, which keeps personal bests in the `meta` store). */
 export function openDb(): Promise<IDBDatabase> {
@@ -67,7 +69,7 @@ const pendingStart = (steps: readonly RecordStep[]): number => {
 
 const stepRange = (gameId: string) => IDBKeyRange.bound([gameId, 0], [gameId, Infinity]);
 
-async function readRecord(db: IDBDatabase, id: string): Promise<GameRecord | null> {
+async function readRecord(db: IDBDatabase, id: string): Promise<{ record: GameRecord; mode?: PlayMode } | null> {
   const tx = db.transaction(['games', 'steps', 'pending'], 'readonly');
   const [header, rows, pending] = await Promise.all([
     req(tx.objectStore('games').get(id) as IDBRequest<GameHeader | undefined>),
@@ -76,23 +78,24 @@ async function readRecord(db: IDBDatabase, id: string): Promise<GameRecord | nul
   ]);
   if (!header || header.version !== RECORD_VERSION) return null;
   rows.sort((a, b) => a.index - b.index);
-  return {
+  const record: GameRecord = {
     tileSet: header.tileSet,
     ...(header.seed === undefined ? {} : { seed: header.seed }),
     opening: header.opening,
     steps: [...rows.map((r) => r.step), ...(pending?.steps ?? [])],
   };
+  return pending?.mode ? { record, mode: pending.mode } : { record };
 }
 
-/** Records of the most recent games, newest first. */
-export async function recentRecords(): Promise<GameRecord[]> {
+/** The most recent saved games (up to RECENT_GAMES, the current one included), newest first. */
+export async function recentGames(): Promise<SavedGame[]> {
   const db = await openDb();
   const headers = (await req(db.transaction('games').objectStore('games').getAll())) as GameHeader[];
   headers.sort((a, b) => b.startedAt - a.startedAt);
-  const out: GameRecord[] = [];
+  const out: SavedGame[] = [];
   for (const h of headers) {
     const r = await readRecord(db, h.id);
-    if (r) out.push(r);
+    if (r) out.push({ id: h.id, startedAt: h.startedAt, record: r.record });
   }
   return out;
 }
@@ -119,15 +122,16 @@ export class Autosave {
   async resume(): Promise<Game | null> {
     const id = (await req(this.db.transaction('meta').objectStore('meta').get('current'))) as string | undefined;
     if (!id) return null;
-    const record = await readRecord(this.db, id);
-    if (!record) return null;
+    const saved = await readRecord(this.db, id);
+    if (!saved) return null;
     let game: Game;
     try {
-      game = replayRecord(record);
+      game = replayRecord(saved.record);
+      if (saved.mode) game.setMode(saved.mode);
     } catch {
       return null;
     }
-    this.attach(game, id, pendingStart(record.steps));
+    this.attach(game, id, pendingStart(saved.record.steps));
     return game;
   }
 
@@ -172,7 +176,7 @@ export class Autosave {
     this.gameId = id;
     this.saved = saved;
     this.off = game.subscribe((e) => {
-      if (e.type === 'tiling-changed') this.save();
+      if (e.type === 'tiling-changed' || e.type === 'mode-changed') this.save();
     });
   }
 
@@ -186,7 +190,7 @@ export class Autosave {
     const steps = this.game.record().steps;
     const cut = pendingStart(steps);
     const fresh = steps.slice(this.saved, cut).map((step, i) => ({ gameId: this.gameId, index: this.saved + i, step }));
-    const pending: PendingRow = { gameId: this.gameId, steps: steps.slice(cut) };
+    const pending: PendingRow = { gameId: this.gameId, steps: steps.slice(cut), mode: this.game.mode() };
     this.saved = cut;
     this.enqueue(async () => {
       const tx = this.db.transaction(['steps', 'pending'], 'readwrite');
