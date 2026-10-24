@@ -74,8 +74,9 @@ export interface Game {
    * The visible dead ends on the board: boundary edges that no tile of any
    * kind, in any orientation, can be glued onto. While playing they can only
    * come from the pending tile (cause 'pending': mark them, the player may
-   * still turn or remove it); once the game is over they are the confirmed
-   * dead ends that ended it (cause 'confirmed').
+   * still turn or remove it), including the case where the pending tile
+   * leaves no candidate inside the growth circle; once the game is over they
+   * are the confirmed dead ends that ended it (cause 'confirmed').
    */
   deadEnds(): readonly DeadEnd[];
   /** Score of the confirmed tiling: its tile count and total area in squared length units. */
@@ -122,10 +123,13 @@ export interface Game {
    * the legal orientations there. When omitted or not a corner of the tile on
    * the tiling, the first such corner (in corner order) is used.
    *
-   * If the board already shows a visible dead end (left by the pending
-   * tile), putting the next tile down confirms the pending tile and ends the
-   * game instead: the new tile is not added and does not score. That also
-   * returns true; check `status()`. Once the game is over it returns false.
+   * The tile must be a candidate of the board as it is (growth circle of the
+   * current confirmed tiling). Then the pending tile is confirmed, the growth
+   * circle grows to the new confirmed tiling, and that tiling is checked: if
+   * it shows a visible dead end inside the new circle (or has no candidate
+   * left in it), the game ends instead: the new tile is not added and does
+   * not score. That also returns true; check `status()`. Once the game is
+   * over it returns false.
    */
   place(placement: Placement, position?: Point): boolean;
   /**
@@ -341,18 +345,18 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
   let finalDead: { from: Point; to: Point }[] | null = null;
   const deadEdges = () => finalDead ?? (deadCache ??= tiling.deadEdges());
   const listeners = new Set<(event: GameEvent) => void>();
+  const hasCandidates = () => tileSet.kinds.some((k) => tiling.candidates(k).length > 0);
   /**
-   * No candidate placement anywhere inside the growth circle: nothing can be
-   * added any more, so the game is over at once (the pending tile, if any, is
-   * confirmed and scores, as with a visible dead end).
+   * No pending tile and no candidate placement anywhere inside the growth
+   * circle: nothing can be added any more, so the game is over at once.
+   * (With a pending tile this is a dead end the pending tile caused: its
+   * edges inside the circle are all dead and marked, and the player may still
+   * turn or remove it.)
    */
   const endIfStuck = (): boolean => {
-    if (status === 'over' || tileSet.kinds.some((k) => tiling.candidates(k).length > 0)) return false;
-    pending = null;
-    tilesSnapshot = null;
+    if (status === 'over' || pending !== null || hasCandidates()) return false;
     status = 'over';
-    syncRegion();
-    deadCache = null;
+    finalDead = deadEdges();
     return true;
   };
   const emit = (event: GameEvent) => {
@@ -434,17 +438,26 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
     if (!tiling.gluedInRegion(placement)) return false;
     const attached = placementVertices(tileSet, placement).filter((v) => tiling.vertex(pointKey(v)));
     const anchor = (position && attached.find((v) => pointKey(v) === pointKey(position))) ?? attached[0]!;
-    const dead = deadEdges();
-    if (dead.length > 0) {
-      // confirm the pending tile; the confirmed tiling has a dead end, so the game ends here
-      // (the step is recorded so a replay ends the same way; the new tile itself is not added)
+    if (pending !== null) {
+      // confirm the pending tile first: the circle grows to the new confirmed tiling, and that
+      // tiling is checked for dead ends (and for having anything left to place onto) before
+      // the new tile goes down
       pending = null;
-      status = 'over';
-      finalDead = dead;
-      steps.push({ type: 'place', placement: { ...placement, dir: mod10(placement.dir) }, position: anchor, mode });
-      emit({ type: 'tiling-changed' });
-      emit({ type: 'game-over' });
-      return true;
+      tilesSnapshot = null;
+      syncRegion();
+      deadCache = null;
+      flowCache = null;
+      const dead = deadEdges();
+      if (dead.length > 0 || !hasCandidates()) {
+        // the game ends here (the step is recorded so a replay ends the same way; the new
+        // tile itself is not added and does not score)
+        status = 'over';
+        finalDead = dead;
+        steps.push({ type: 'place', placement: { ...placement, dir: mod10(placement.dir) }, position: anchor, mode });
+        emit({ type: 'tiling-changed' });
+        emit({ type: 'game-over' });
+        return true;
+      }
     }
     pending = { id: tiling.add(placement).id, position: anchor };
     steps.push({ type: 'place', placement: tiling.tiles[pending.id]!.placement, position: anchor, mode });

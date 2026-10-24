@@ -11,6 +11,7 @@ import {
   type Point,
   zphi,
 } from '../../src/engine';
+import { allCandidates, asOpening, keyOf, rng } from './helpers';
 
 /** Area-weighted centroid of the confirmed tiling (shoelace), computed independently of the engine. */
 function confirmedCentroid(game: Game) {
@@ -31,8 +32,6 @@ function confirmedCentroid(game: Game) {
   return { x: cx / a, y: cy / a };
 }
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${((p.dir % 10) + 10) % 10}`;
-const allCandidates = (game: Game) => [...game.candidates('kite'), ...game.candidates('dart')];
 const centreOf = (pts: readonly Point[]) => {
   const xy = pts.map(toXY);
   return { x: xy.reduce((s, p) => s + p.x, 0) / xy.length, y: xy.reduce((s, p) => s + p.y, 0) / xy.length };
@@ -142,6 +141,72 @@ describe('growth circle', () => {
     expect(game.place(allCandidates(game)[0]!)).toBe(true);
     expect(game.status()).toBe('playing');
     expect(game.tiles().length).toBe(opening.length + 2);
+  });
+
+  it('a pending tile that leaves no candidate inside the circle is marked; the game goes on until it is confirmed', () => {
+    // a deliberately tiny circle (negative margin), so one tile can close off everything inside it
+    const margin = -0.4;
+    let found: { opening: Placement[]; tile: Placement } | null = null;
+    for (let seed = 1; seed <= 20 && !found; seed++) {
+      const opening = openingPatch(seed);
+      const probe = createGame({ opening, growthMargin: margin });
+      for (const tile of allCandidates(probe)) {
+        const game = createGame({ opening, growthMargin: margin });
+        game.place(tile);
+        if (allCandidates(game).length === 0 && game.deadEnds().length > 0) {
+          found = { opening, tile };
+          break;
+        }
+      }
+    }
+    expect(found).not.toBeNull();
+    const { opening, tile } = found!;
+    const game = createGame({ opening, growthMargin: margin });
+    expect(game.place(tile)).toBe(true);
+    expect(allCandidates(game)).toEqual([]);
+    expect(game.status()).toBe('playing');
+    expect(game.pendingTile()).not.toBeNull();
+    expect(game.deadEnds().every((d) => d.cause === 'pending')).toBe(true);
+    // the player can still take it back
+    expect(game.removePending()).toBe(true);
+    expect(allCandidates(game).length).toBeGreaterThan(0);
+    expect(game.deadEnds()).toEqual([]);
+  });
+
+  it('a dead end the confirmed tiling only shows once the circle grows ends the game when the next tile is placed', () => {
+    const deadKeys = (g: Game) => g.deadEnds().map((d) => [d.from, d.to].map(pointKey).sort().join('|')).sort();
+    let checked = false;
+    for (let seed = 1; seed <= 60 && !checked; seed++) {
+      const random = rng(seed);
+      const game = createGame({ opening: openingPatch(seed) });
+      for (let step = 0; step < 80 && game.status() === 'playing' && !checked; step++) {
+        if (game.deadEnds().length > 0) {
+          game.removePending();
+          continue;
+        }
+        const all = allCandidates(game);
+        if (all.length === 0) break;
+        const next = all[Math.floor(random() * all.length)]!;
+        // the confirmed tiling once the pending tile is confirmed (and the circle has grown to it)
+        const witness = game.pendingTile() ? createGame({ opening: asOpening(game.tiles()) }) : null;
+        if (!witness || witness.deadEnds().length === 0) {
+          expect(game.place(next)).toBe(true);
+          expect(game.status() === 'over' || game.deadEnds().every((d) => d.cause === 'pending')).toBe(true);
+          continue;
+        }
+        const before = game.tiles().length;
+        expect(game.place(next)).toBe(true);
+        expect(game.status()).toBe('over');
+        expect(game.deadEnds().every((d) => d.cause === 'confirmed')).toBe(true);
+        expect(deadKeys(game)).toEqual(deadKeys(witness));
+        // the pending tile was confirmed and scores; the new one was not added
+        expect(game.tiles().length).toBe(before);
+        expect(game.score().tiles).toBe(before);
+        expect(game.pendingTile()).toBeNull();
+        checked = true;
+      }
+    }
+    expect(checked).toBe(true);
   });
 
   it('with no candidate placement anywhere inside the circle the game is over', () => {
