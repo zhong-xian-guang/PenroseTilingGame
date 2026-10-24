@@ -163,14 +163,30 @@ describe('analyzeRecord: what counts', () => {
     expect(s.area).toBeCloseTo(2 * KITE_AREA + DART_AREA, 12);
   });
 
-  it('splits the placements into free and flow mode; steps without a mode were played free', () => {
+  it('splits the confirmed placed tiles into free and flow mode; steps without a mode were played free', () => {
+    // three places, the last one ends the game and is not scored
     const record = finishedGame().record();
-    expect(analyzeRecord(record).modes).toEqual({ free: 3, flow: 0 });
+    expect(analyzeRecord(record).modes).toEqual({ free: 2, flow: 0 });
     const flowed: GameRecord = {
       ...record,
       steps: record.steps.map((s, i) => (s.type === 'place' && i > 0 ? { ...s, mode: 'flow' as const } : s)),
     };
-    expect(analyzeRecord(flowed).modes).toEqual({ free: 1, flow: 2 });
+    expect(analyzeRecord(flowed).modes).toEqual({ free: 1, flow: 1 });
+  });
+
+  it('does not count removed tiles or the pending tile in the mode split', () => {
+    const game = createGame();
+    const all = () => [...game.candidates('kite'), ...game.candidates('dart')];
+    game.place(all()[0]!); // free, then removed
+    game.removePending();
+    game.setMode('flow');
+    game.place(all()[0]!); // flow, confirmed by the next one
+    game.place(all()[0]!); // flow, confirmed by the next one
+    game.setMode('free');
+    game.place(all()[0]!); // free, still pending
+    expect(game.status()).toBe('playing');
+    expect(game.score().tiles).toBe(3);
+    expect(analyzeRecord(game.record()).modes).toEqual({ free: 0, flow: 2 });
   });
 });
 

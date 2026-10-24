@@ -9,9 +9,9 @@
  * - roundness: share of the equal-area disc (radius √(A/π), centred at c) that the
  *   tiling covers; 1 only for a perfect disc.
  */
-import { replayRecord, replayWith, type DeadEnd, type Game, type GameStatus, type PlacedTile, type Score } from './game';
+import { replayWith, type DeadEnd, type Game, type GameStatus, type PlacedTile, type Score } from './game';
 import { pointKey, toXY } from './point';
-import type { GameRecord } from './record';
+import type { GameRecord, PlayMode } from './record';
 import { shapeOf } from './tileset';
 
 export interface GameStats {
@@ -31,7 +31,11 @@ export interface GameStats {
   readonly equalAreaRadius: number;
   /** Share (0–1) of the equal-area disc around the centroid that the tiling covers. */
   readonly roundness: number;
-  /** Number of 'place' steps played in each mode (a step without a mode counts as free). */
+  /**
+   * How many of the confirmed tiles the player placed in each mode (opening,
+   * removed, pending and game-ending tiles excluded; a step without a mode
+   * counts as free).
+   */
   readonly modes: { readonly free: number; readonly flow: number };
 }
 
@@ -123,7 +127,18 @@ function covers(q: readonly XY[], p: XY): boolean {
 
 /** Statistics of the confirmed tiling a record ends with. Throws like `replayRecord` on a bad record. */
 export function analyzeRecord(record: GameRecord): GameStats {
-  const game = replayRecord(record);
+  // the mode of each placed tile that ends up confirmed: a place step confirms the previous
+  // pending tile; removed tiles, the game-ending tile and a final pending tile do not count
+  const modes = { free: 0, flow: 0 };
+  let pendingMode: PlayMode | null = null;
+  const game = replayWith(record, (g, i) => {
+    const step = record.steps[i - 1];
+    if (!step) return;
+    if (step.type === 'remove') pendingMode = null;
+    if (step.type !== 'place') return;
+    if (pendingMode) modes[pendingMode]++;
+    pendingMode = g.pendingTile() ? (step.mode ?? 'free') : null;
+  });
   const tiles = game.confirmedTiles();
   const count = (kind: string) => tiles.filter((t) => t.kind === kind).length;
   const kites = count('kite');
@@ -170,9 +185,6 @@ export function analyzeRecord(record: GameRecord): GameStats {
     area > 0
       ? Math.min(1, polys.reduce((s, q) => s + areaInDisc(q, centroid, equalAreaRadius), 0) / area)
       : 0;
-
-  const modes = { free: 0, flow: 0 };
-  for (const step of record.steps) if (step.type === 'place') modes[step.mode ?? 'free']++;
 
   return {
     modes,
