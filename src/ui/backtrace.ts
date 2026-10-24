@@ -38,6 +38,11 @@ function run(record: GameRecord): Promise<Backtrace | null> {
     worker.onmessage = (e: MessageEvent<{ ok: boolean; result?: Backtrace }>) =>
       done(e.data.ok ? (e.data.result ?? null) : null);
     worker.onerror = () => done(null);
-    worker.postMessage(record);
+    try {
+      worker.postMessage(record);
+    } catch {
+      // e.g. DataCloneError for a non-cloneable record: keep the never-rejects promise
+      done(null);
+    }
   });
 }

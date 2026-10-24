@@ -62,7 +62,8 @@
 
   const open = (row: Row) => {
     dialog.close();
-    onopen(row.game.record);
+    // plain copy: the $state proxy can't be structured-cloned to the backtrace worker
+    onopen($state.snapshot(row.game.record) as GameRecord);
   };
 </script>
 
