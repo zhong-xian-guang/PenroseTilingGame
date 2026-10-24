@@ -83,7 +83,8 @@ def cmap_of(font):
 
 
 def main():
-    job = json.load(sys.stdin)
+    # the job is UTF-8 JSON; sys.stdin would decode it with the locale encoding (cp950 on a zh-TW Windows)
+    job = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     charset = set(job["charset"])
     out_dir = job["outDir"]
     os.makedirs(out_dir, exist_ok=True)
