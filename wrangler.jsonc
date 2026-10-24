@@ -1,0 +1,10 @@
+// Cloudflare Workers static-assets deployment: Workers Builds runs `npm run build`, then `npx wrangler deploy`
+// uploads dist/ as-is (no Worker script). public/_headers is applied to the assets. See docs/deployment.md.
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "penrosetilinggame",
+  "compatibility_date": "2026-10-19",
+  "assets": {
+    "directory": "./dist"
+  }
+}

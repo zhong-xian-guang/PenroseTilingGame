@@ -4,7 +4,7 @@
 
 使用者偏好的溝通語言是繁體中文：回覆、說明與文件請用繁體中文（程式碼、識別字與 commit 訊息照既有慣例）。
 
-部署：Cloudflare Pages Git 整合，push 到 `main` 即上線，見 `docs/deployment.md`。
+部署：Cloudflare Workers（靜態資源）的 Git 整合，push 到 `main` 即上線，見 `docs/deployment.md`。
 
 ## Agent skills
 
