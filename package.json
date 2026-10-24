@@ -8,6 +8,8 @@
     "build": "npm run fonts && npm run check && vite build",
     "fonts": "node scripts/build-fonts.ts",
     "preview": "vite preview",
+    "build:bench": "npm run check && vite build --mode bench",
+    "preview:bench": "vite preview --mode bench",
     "icons": "pwa-assets-generator",
     "test": "vitest run",
     "test:watch": "vitest",

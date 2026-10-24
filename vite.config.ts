@@ -2,7 +2,13 @@ import { defineConfig } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig({
+// `vite build --mode bench` (npm run build:bench) also emits bench.html, the large-tiling benchmark, into
+// dist-bench/; the normal build leaves it out. The dev server serves /bench.html either way.
+export default defineConfig(({ mode }) => ({
+  build:
+    mode === 'bench'
+      ? { outDir: 'dist-bench', rollupOptions: { input: { main: 'index.html', bench: 'bench.html' } } }
+      : {},
   plugins: [
     svelte(),
     VitePWA({
@@ -43,4 +49,4 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     environment: 'node',
   },
-});
+}));

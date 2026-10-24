@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Penrose bench</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #f6f4ef;
+        color: #2b3440;
+        font: 13px/1.4 system-ui, sans-serif;
+        overscroll-behavior: none;
+      }
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        touch-action: none;
+      }
+      #status {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        right: 8px;
+        margin: 0;
+        padding: 6px 10px;
+        background: #ffffffe6;
+        border-radius: 8px;
+        white-space: pre-wrap;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="board"></canvas>
+    <pre id="status">loading…</pre>
+    <script type="module" src="/src/bench/main.ts"></script>
+  </body>
+</html>
