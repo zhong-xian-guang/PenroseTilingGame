@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createGame, P2, pointKey, type Game, type Placement } from '../../src/engine';
+import { keyOf, rng } from './helpers';
 
 /**
  * The engine keeps candidates and dead ends up to date incrementally (only
@@ -8,18 +9,6 @@ import { createGame, P2, pointKey, type Game, type Placement } from '../../src/e
  * history, so everything it reports is computed from scratch.
  */
 
-function rng(seed: number) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${((p.dir % 10) + 10) % 10}`;
 const candidateKeys = (game: Game) => P2.kinds.flatMap((k) => game.candidates(k).map(keyOf)).sort();
 const deadKeys = (game: Game) => game.deadEnds().map((d) => `${pointKey(d.from)}>${pointKey(d.to)}`).sort();
 const asOpening = (game: Game): Placement[] => game.tiles().map(({ kind, origin, dir }) => ({ kind, origin, dir }));

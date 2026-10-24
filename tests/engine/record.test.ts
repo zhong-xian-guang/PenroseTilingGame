@@ -6,13 +6,11 @@ import {
   openingPatch,
   ORIGIN,
   P2,
-  pointKey,
   replayRecord,
   type Game,
-  type Placement,
 } from '../../src/engine';
+import { keyOf } from './helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${((p.dir % 10) + 10) % 10}`;
 
 /** Everything a player can see of a position: confirmed tiling, pending tile, and what fits next. */
 const snapshot = (game: Game) => ({

@@ -1,18 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGame, P2, pointKey, type Placement } from '../../src/engine';
 import { hasTJunction, overlapArea, polygonOf, sharedEdgeCount } from './oracle';
-
-/** Small deterministic PRNG (mulberry32) so failures are reproducible. */
-function rng(seed: number) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+import { rng } from './helpers';
 
 const MAX_STEPS = 500;
 

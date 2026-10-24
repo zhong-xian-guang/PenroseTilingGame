@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createGame, ORIGIN, pointKey, type Placement } from '../../src/engine';
+import { createGame, ORIGIN, type Placement } from '../../src/engine';
+import { keyOf } from './helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${((p.dir % 10) + 10) % 10}`;
 const sameP = (a: Placement, b: Placement) => keyOf(a) === keyOf(b);
 
 const opening: Placement = { kind: 'kite', origin: ORIGIN, dir: 0 };

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGame, openingPatch, pointKey, type Placement } from '../../src/engine';
+import { keyOf } from './helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${p.dir}`;
 const SEEDS = Array.from({ length: 200 }, (_, i) => i * 7919 + 1);
 
 describe('opening patch', () => {

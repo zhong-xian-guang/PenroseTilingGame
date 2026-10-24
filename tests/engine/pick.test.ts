@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createGame, pointKey, toXY, type Placement } from '../../src/engine';
+import { createGame, pointKey, toXY } from '../../src/engine';
+import { keyOf } from './helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${p.dir}`;
 
 describe('picking the candidate placement nearest the pointer', () => {
   it('pointing at where a candidate would sit picks that candidate', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGame, ORIGIN, P2, pointKey, type Placement, type Point } from '../../src/engine';
+import { keyOf } from './helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${p.dir}`;
 
 describe('vertex configurations', () => {
   it('recognises a complete sun', () => {

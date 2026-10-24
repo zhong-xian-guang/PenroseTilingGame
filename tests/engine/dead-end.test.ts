@@ -12,8 +12,8 @@ import {
   type Placement,
   type Point,
 } from '../../src/engine';
+import { keyOf } from './helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${((p.dir % 10) + 10) % 10}`;
 
 /**
  * A three-tile dead end found by exhaustive search from the single opening

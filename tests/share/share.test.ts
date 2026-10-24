@@ -4,10 +4,8 @@ import {
   encodeRecord,
   openingPatch,
   P2,
-  pointKey,
   replayRecord,
   type Game,
-  type Placement,
 } from '../../src/engine';
 import {
   decodeShareText,
@@ -18,8 +16,8 @@ import {
   shareRecord,
   ShareError,
 } from '../../src/share/share';
+import { keyOf } from '../engine/helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${((p.dir % 10) + 10) % 10}`;
 
 /** Everything a player can see of a position: confirmed tiling, pending tile, status and score. */
 const snapshot = (game: Game) => ({

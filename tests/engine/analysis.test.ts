@@ -5,15 +5,14 @@ import {
   openingPatch,
   ORIGIN,
   P2,
-  pointKey,
   replayFrames,
   toXY,
   zphi,
   type GameRecord,
   type Placement,
 } from '../../src/engine';
+import { keyOf } from './helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${((p.dir % 10) + 10) % 10}`;
 
 /** P2 areas with short edge 1 (literature): kite = φ² sin 36°, dart = sin 72°. */
 const KITE_AREA = 1.5388417685876268;

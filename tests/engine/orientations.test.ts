@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGame, ORIGIN, pointKey, toXY, type Game, type Placement, type Point } from '../../src/engine';
+import { keyOf } from './helpers';
 
-const keyOf = (p: Placement) => `${p.kind}@${pointKey(p.origin)}/${p.dir}`;
 const touches = (game: Game, p: Placement, at: Point) =>
   game.verticesOf(p).some((v) => pointKey(v) === pointKey(at));
 
