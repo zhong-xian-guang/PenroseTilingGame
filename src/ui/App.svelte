@@ -19,7 +19,7 @@
   import { derivePalette } from '../settings/palette';
   import { displaySettings } from '../settings/store.svelte';
   import { Autosave } from '../storage/autosave';
-  import { submitScore, type BestComparison } from '../storage/best';
+  import { lookupBest, submitScore, type BestComparison } from '../storage/best';
   import { backtraceInBackground } from './backtrace';
   import Tray from './Tray.svelte';
   import Menu from './Menu.svelte';
@@ -47,7 +47,10 @@
   let flowFits = $state(false);
   /** The finished game compared with the personal best of its tile set (submitted once per finished game). */
   let best = $state<BestComparison | null>(null);
-  let bestFor: Game | null = null;
+  /** The game whose end has been handled (score submitted, record fixed, backtrace started). */
+  let finishedGame: Game | null = null;
+  /** A game resumed after a reload that was already over: its score was submitted when it ended. */
+  let resumedOver: Game | null = null;
   /** The analysis page is open (in place of the summary); it shows `analysisRecord`. */
   let analysisOpen = $state(false);
   let analysisRecord = $state.raw<GameRecord | null>(null);
@@ -68,10 +71,11 @@
     });
   });
   /**
-   * The analysis page shows someone else's record (share link or imported file, ticket 11). Such a record is
-   * only replayed for viewing: the own game, its autosave and the personal best are never touched.
+   * Whose record the analysis page shows: the own finished game, someone else's (share link or imported
+   * file, ticket 11) or one of the own saved games (recent games). The last two are only replayed for
+   * viewing: the own game, its autosave and the personal best are never touched.
    */
-  let analysisShared = $state(false);
+  let analysisViewing = $state<'own' | 'shared' | 'saved'>('own');
   /** Why a shared record could not be opened. */
   let shareError = $state<ShareError | null>(null);
   let shareErrorDialog: HTMLDialogElement;
@@ -79,9 +83,9 @@
     if (shareError && !shareErrorDialog.open) shareErrorDialog.showModal();
   });
 
-  const viewShared = (record: GameRecord) => {
+  const viewShared = (record: GameRecord, viewing: 'shared' | 'saved' = 'shared') => {
     analysisRecord = record;
-    analysisShared = true;
+    analysisViewing = viewing;
     analysisOpen = true;
   };
   const showShareError = (e: unknown) => {
@@ -107,28 +111,40 @@
     }
   };
 
-  const recompute = () => {
+  /** Mirror the engine state the HUD, tray and hints show. */
+  const mirrorState = () => {
     selected = game.selectedKind();
     score = game.score();
     over = game.status() === 'over';
     mode = game.mode();
+  };
+  /** Flow mode hints: is there a spot, and does the selected kind fit it? */
+  const updateFlowHint = () => {
     const spot = mode === 'flow' ? game.flowSpot() : null;
     flowSpot = spot !== null;
     flowFits = !!spot && !!selected && game.orientationsAt(spot.position, selected).length > 0;
-    if (over && bestFor !== game) {
-      const finished = game;
-      bestFor = finished;
-      best = null;
-      void submitScore(finished.tileSet.id, finished.score()).then((c) => {
-        if (game === finished) best = c;
-      });
-      // the record of a finished game never changes: the summary and the analysis page share it (and its backtrace)
-      finishedRecord = finished.record();
-      summaryBacktrace = undefined;
-      void backtraceInBackground(finishedRecord).then((b) => {
-        if (game === finished) summaryBacktrace = b;
-      });
-    }
+  };
+  /** Once per finished game: compare with (and maybe store) the personal best, fix the record, start the backtrace. */
+  const handleFinish = (finished: Game) => {
+    finishedGame = finished;
+    best = null;
+    // a game resumed already over was submitted when it ended: only look the best up
+    const comparison =
+      finished === resumedOver ? lookupBest(finished.tileSet.id) : submitScore(finished.tileSet.id, finished.score());
+    void comparison.then((c) => {
+      if (game === finished) best = c;
+    });
+    // the record of a finished game never changes: the summary and the analysis page share it (and its backtrace)
+    finishedRecord = finished.record();
+    summaryBacktrace = undefined;
+    void backtraceInBackground(finishedRecord).then((b) => {
+      if (game === finished) summaryBacktrace = b;
+    });
+  };
+  const recompute = () => {
+    mirrorState();
+    updateFlowHint();
+    if (over && finishedGame !== game) handleFinish(game);
   };
   recompute();
 
@@ -195,6 +211,7 @@
       const resumed = await store.resume().catch(() => null);
       if (!alive) return;
       if (resumed) {
+        if (resumed.status() === 'over') resumedOver = resumed;
         game = resumed;
         attach();
       } else {
@@ -237,7 +254,7 @@
     <div><span class="label">{t('hud.area')}</span> <strong>{score.area.toFixed(2)}</strong></div>
   </header>
 
-  <Menu onimport={importRecord} />
+  <Menu onimport={importRecord} onopenrecord={(record) => viewShared(record, 'saved')} />
 
   <button type="button" class="new-game" onclick={startNewGame}>{t('game.new')}</button>
 
@@ -298,7 +315,7 @@
     doomedAt={summaryBacktrace === undefined ? undefined : (summaryBacktrace?.doomedAt ?? null)}
     ondetails={() => {
       analysisRecord = finishedRecord ?? game.record();
-      analysisShared = false;
+      analysisViewing = 'own';
       analysisOpen = true;
     }}
     onnewgame={startNewGame}
@@ -307,7 +324,7 @@
     open={analysisOpen}
     record={analysisRecord}
     backtrace={analysisBacktrace}
-    shared={analysisShared}
+    viewing={analysisViewing}
     {palette}
     showArcs={displaySettings.value.showArcs}
     onback={() => (analysisOpen = false)}

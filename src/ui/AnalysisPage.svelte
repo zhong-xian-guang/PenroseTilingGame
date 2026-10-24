@@ -5,7 +5,7 @@
    * computed from the game record (engine `analyzeRecord` / `replayFrames`),
    * and the mistake backtrace (ticket 10, computed in the background by App).
    */
-  import { analyzeRecord, replayFrames, type Backtrace, type GameRecord } from '../engine';
+  import { analyzeRecord, PHI, replayFrames, type Backtrace, type GameRecord } from '../engine';
   import type { Palette } from '../board/renderer';
   import { t } from '../i18n/index.svelte';
   import Replay from './Replay.svelte';
@@ -15,7 +15,7 @@
     open,
     record,
     backtrace,
-    shared = false,
+    viewing = 'own',
     palette,
     showArcs,
     onback,
@@ -24,8 +24,11 @@
     record: GameRecord | null;
     /** Undefined while it runs, null when unavailable. */
     backtrace: Backtrace | null | undefined;
-    /** The record came from someone else (ticket 11): a share link or an imported file. */
-    shared?: boolean;
+    /**
+     * Whose record this is: the own game just finished, someone else's (ticket 11: a share link or an
+     * imported file), or one of the own saved games (recent games list). The last two are view-only.
+     */
+    viewing?: 'own' | 'shared' | 'saved';
     palette?: Palette;
     showArcs?: boolean;
     onback: () => void;
@@ -57,12 +60,22 @@
     else if (!open && dialog.open) dialog.close();
   });
 
-  // Only computed while open: the record is replayed once for each.
-  const stats = $derived(open && record ? analyzeRecord(record) : null);
-  const frames = $derived(open && record ? replayFrames(record) : []);
+  // Only computed while open: the record is replayed once for each. A record that no longer
+  // replays (e.g. an old save from before a rule change) shows a message instead.
+  const analysis = $derived.by(() => {
+    if (!open || !record) return null;
+    try {
+      return { stats: analyzeRecord(record), frames: replayFrames(record) };
+    } catch {
+      return 'failed' as const;
+    }
+  });
+  const failed = $derived(analysis === 'failed');
+  const stats = $derived(analysis && analysis !== 'failed' ? analysis.stats : null);
+  const frames = $derived(analysis && analysis !== 'failed' ? analysis.frames : []);
 
   /** φ: the kite-to-dart ratio of an infinite P2 tiling. */
-  const ideal = (1 + Math.sqrt(5)) / 2;
+  const ideal = PHI;
   const percent = (part: number, whole: number) => (whole > 0 ? Math.round((100 * part) / whole) : 0);
   const places = $derived(stats ? stats.modes.free + stats.modes.flow : 0);
   // A game with no placement at all counts as fully free.
@@ -80,15 +93,20 @@
   <header>
     <button type="button" class="back" onclick={onback}>{t('analysis.back')}</button>
     <h2 id="analysis-title">{t('analysis.title')}</h2>
-    <button type="button" class="back share" onclick={share} disabled={!record}>{t('share.button')}</button>
+    <button type="button" class="back share" onclick={share} disabled={!record || failed}>{t('share.button')}</button>
   </header>
   {#if shareStatus}
     <p class="note" role="status">
       {shareStatus === 'copied' ? t('share.copied') : shareStatus === 'file' ? t('share.file') : t('share.failed')}
     </p>
   {/if}
-  {#if shared}
+  {#if viewing === 'shared'}
     <p class="note">{t('share.viewing')}</p>
+  {:else if viewing === 'saved'}
+    <p class="note">{t('recent.viewing')}</p>
+  {/if}
+  {#if failed}
+    <p class="note" role="alert">{t('analysis.replayFailed')}</p>
   {/if}
 
   {#if stats}

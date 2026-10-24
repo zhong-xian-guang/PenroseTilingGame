@@ -87,5 +87,18 @@
   "share.error.title": "Cannot open this record",
   "share.error.version": "This record comes from a different version of the game (record format {version}; this version reads only format {expected}).",
   "share.error.malformed": "This link or file is not a valid game record.",
-  "share.error.close": "OK"
+  "share.error.close": "OK",
+  "analysis.replayFailed": "This record cannot be replayed (it may come from an older version of the rules), so there is no analysis to show.",
+  "recent.open": "Recent games",
+  "recent.title": "Recent games",
+  "recent.intro": "The last {n} games are kept on this device. Pick one to see its replay and analysis.",
+  "recent.empty": "No saved games yet.",
+  "recent.loading": "Loading...",
+  "recent.time": "{y}/{m}/{d} {hh}:{mm}",
+  "recent.summary": "{tiles} tiles, area {area} square units",
+  "recent.playing": "in progress",
+  "recent.over": "finished",
+  "recent.unreadable": "cannot be replayed",
+  "recent.close": "Close",
+  "recent.viewing": "One of your saved games, for viewing only. Your game in progress is not affected."
 }

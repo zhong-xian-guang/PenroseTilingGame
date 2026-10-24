@@ -87,5 +87,18 @@
   "share.error.title": "無法開啟這份棋譜",
   "share.error.version": "這份棋譜來自不同版本的遊戲（棋譜格式 {version}，目前的版本只能讀取格式 {expected}）。",
   "share.error.malformed": "這個連結或檔案不是有效的棋譜。",
-  "share.error.close": "確定"
+  "share.error.close": "確定",
+  "analysis.replayFailed": "這份棋譜無法重播（可能來自舊版本的規則），所以無法顯示分析。",
+  "recent.open": "最近棋譜",
+  "recent.title": "最近的棋譜",
+  "recent.intro": "本機保留最近 {n} 局。點選一局即可查看重播與分析。",
+  "recent.empty": "還沒有保存的棋譜。",
+  "recent.loading": "讀取中...",
+  "recent.time": "{y}/{m}/{d} {hh}:{mm}",
+  "recent.summary": "{tiles} 片，面積 {area} 平方單位",
+  "recent.playing": "進行中",
+  "recent.over": "已結束",
+  "recent.unreadable": "無法重播",
+  "recent.close": "關閉",
+  "recent.viewing": "這是你自己保存的棋譜，只供查看，不會影響目前這局。"
 }

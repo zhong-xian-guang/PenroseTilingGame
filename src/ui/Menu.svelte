@@ -1,10 +1,19 @@
 <script lang="ts">
   import { i18n, t } from '../i18n/index.svelte';
   import oflText from '../fonts/OFL.txt?raw';
+  import type { GameRecord } from '../engine';
   import SettingsDialog from './SettingsDialog.svelte';
+  import RecentGames from './RecentGames.svelte';
 
-  /** A record file picked through "Open record" (ticket 11). */
-  let { onimport }: { onimport?: (file: File) => void } = $props();
+  let {
+    onimport,
+    onopenrecord,
+  }: {
+    /** A record file picked through "Open record" (ticket 11). */
+    onimport?: (file: File) => void;
+    /** A saved game picked from "Recent games". */
+    onopenrecord?: (record: GameRecord) => void;
+  } = $props();
 
   let about: HTMLDialogElement;
   let fileInput: HTMLInputElement;
@@ -15,6 +24,7 @@
     {t('language.other')}
   </button>
   <SettingsDialog />
+  <RecentGames onopen={(record) => onopenrecord?.(record)} />
   <button type="button" onclick={() => fileInput.click()}>{t('share.open')}</button>
   <input
     bind:this={fileInput}
@@ -50,6 +60,9 @@
     top: 12px;
     right: 64px;
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: calc(100vw - 80px);
     gap: 6px;
   }
   button {
