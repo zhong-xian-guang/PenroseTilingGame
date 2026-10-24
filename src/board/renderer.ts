@@ -3,6 +3,7 @@
  * through its query interface and never decides anything about the rules.
  */
 import { toXY, type Game, type Placement, type Point, type TileKind } from '../engine';
+import { DEFAULT_SETTINGS, derivePalette } from '../settings/palette';
 import type { Camera, XY } from './camera';
 import type { TileLayer, View } from './tile-layer';
 
@@ -22,12 +23,9 @@ export interface Palette {
   flowSpot: string;
 }
 
+/** The default palette: the default settings' colours (and what derives from them), plus the fixed marks. */
 export const DEFAULT_PALETTE: Palette = {
-  background: '#f6f4ef',
-  tiles: { kite: '#7fa6d6', dart: '#ecbc74' },
-  outline: '#2b3440',
-  arcA: '#8a3b2a',
-  arcB: '#1f4f7a',
+  ...derivePalette(DEFAULT_SETTINGS.colors),
   pending: '#d1495b',
   deadEnd: '#e03131',
   growthCircle: 'rgba(43, 52, 64, 0.35)',

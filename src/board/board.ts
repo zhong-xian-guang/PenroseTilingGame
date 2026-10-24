@@ -35,6 +35,7 @@
  * view (FLOW_PAN_MARGIN).
  */
 import {
+  FLOW_PAN_EASE,
   FLOW_PAN_MARGIN,
   ORIGIN,
   pointKey,
@@ -53,7 +54,6 @@ const DRAG_THRESHOLD = 4; // CSS px before a press becomes a pan
 const WHEEL_ZOOM = 1.0015; // per wheel delta unit
 const TOUCH_SLOP = 10; // CSS px a finger may wander and still count as a tap
 const FINGER_LIFT = 72; // CSS px between the finger and the point it aims at
-const PAN_EASE = 0.15; // share of the remaining distance the flow-mode camera covers per frame
 
 /** What the fingers on the canvas are doing. */
 type TouchGesture =
@@ -220,8 +220,8 @@ export class Board {
       this.panTarget = null;
       return false;
     }
-    this.camera.x += dx * PAN_EASE;
-    this.camera.y += dy * PAN_EASE;
+    this.camera.x += dx * FLOW_PAN_EASE;
+    this.camera.y += dy * FLOW_PAN_EASE;
     return true;
   }
 

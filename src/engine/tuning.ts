@@ -31,3 +31,9 @@ export const FLOW_NEAR_RADIUS = 2;
  * Larger = pans earlier and more often; smaller = steadier view.
  */
 export const FLOW_PAN_MARGIN = 0.18;
+
+/**
+ * Flow mode camera (presentation): the share of the remaining distance to the
+ * spot the gliding camera covers each frame. Larger = snappier; smaller = softer.
+ */
+export const FLOW_PAN_EASE = 0.15;
