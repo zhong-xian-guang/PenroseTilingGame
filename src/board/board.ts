@@ -82,7 +82,6 @@ interface Hover {
 export class Board {
   readonly camera = new Camera();
   palette: Palette = DEFAULT_PALETTE;
-  showArcs = true;
 
   private readonly ctx: CanvasRenderingContext2D;
   /** Off-screen cache of the confirmed tiling (panning and zooming redraw bitmaps, not tiles). */
@@ -537,7 +536,6 @@ export class Board {
     const placement = hover ? (hover.pick.orientations[hover.index] ?? null) : null;
     const g = this.gesture;
     const { redrawLater, redrawNow } = drawBoard(this.ctx, this.game, this.camera, this.dpr, this.palette, {
-      showArcs: this.showArcs,
       pendingHovered: this.overPending || (g?.type === 'pending' && !g.dragging),
       preview: placement && hover ? { placement, position: hover.pick.position } : null,
       ghost: this.ghost(),

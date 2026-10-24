@@ -15,14 +15,12 @@
   let {
     frames,
     palette = DEFAULT_PALETTE,
-    showArcs = true,
     index = $bindable(0),
     doomedStep = null,
     finalDeadEnds = [],
   }: {
     frames: readonly ReplayFrame[];
     palette?: Palette;
-    showArcs?: boolean;
     /** The frame shown. */
     index?: number;
     /** Step (= frame index) the game was doomed by at the latest, to mark. */
@@ -92,7 +90,7 @@
     if (bounds) camera.fit(bounds.min, bounds.max, 1);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    drawBoard(ctx, frame, camera, dpr, palette, { showArcs, pendingHovered: false, preview: null });
+    drawBoard(ctx, frame, camera, dpr, palette, { pendingHovered: false, preview: null });
     drawMarks(ctx, camera, frame);
   });
 

@@ -17,7 +17,6 @@
     backtrace,
     viewing = 'own',
     palette,
-    showArcs,
     onback,
   }: {
     open: boolean;
@@ -30,7 +29,6 @@
      */
     viewing?: 'own' | 'shared' | 'saved';
     palette?: Palette;
-    showArcs?: boolean;
     onback: () => void;
   } = $props();
 
@@ -207,7 +205,6 @@
       <Replay
         {frames}
         {palette}
-        {showArcs}
         bind:index={replayIndex}
         doomedStep={backtrace?.doomedAt ?? null}
         finalDeadEnds={backtrace?.deadEnds ?? []}

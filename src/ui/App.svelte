@@ -22,6 +22,7 @@
   import { lookupBest, submitScore, type BestComparison } from '../storage/best';
   import { backtraceInBackground } from './backtrace';
   import Tray from './Tray.svelte';
+  import { tileOutline } from '../board/outline';
   import Menu from './Menu.svelte';
   import GameOverDialog from './GameOverDialog.svelte';
   import AnalysisPage from './AnalysisPage.svelte';
@@ -158,15 +159,13 @@
 
   let offGame: (() => void) | null = null;
 
-  // Display settings (colours, Conway arcs) → board palette; derived colours override the defaults.
+  // Display settings (colours) → board palette; derived colours override the defaults.
   const palette = $derived<Palette>({ ...DEFAULT_PALETTE, ...derivePalette(displaySettings.value.colors) });
   const applySettings = () => {
     // read the reactive values before the guard, so the $effect below always tracks them
     const next = palette;
-    const showArcs = displaySettings.value.showArcs;
     if (!board) return;
     board.palette = next;
-    board.showArcs = showArcs;
     board.requestDraw();
   };
   $effect(applySettings);
@@ -232,7 +231,8 @@
   /** Tray icons: each tile kind normalised into a 0–1 box, y flipped for SVG. */
   const icons = Object.fromEntries(
     P2.kinds.map((kind) => {
-      const pts = createGame({ opening: [] }).verticesOf({ kind, origin: ORIGIN, dir: 2 }).map(toXY);
+      const corners = createGame({ opening: [] }).verticesOf({ kind, origin: ORIGIN, dir: 2 }).map(toXY);
+      const pts = tileOutline(P2.shapes[kind]!, corners);
       const minX = Math.min(...pts.map((p) => p.x));
       const maxX = Math.max(...pts.map((p) => p.x));
       const minY = Math.min(...pts.map((p) => p.y));
@@ -326,7 +326,6 @@
     backtrace={analysisBacktrace}
     viewing={analysisViewing}
     {palette}
-    showArcs={displaySettings.value.showArcs}
     onback={() => (analysisOpen = false)}
   />
 

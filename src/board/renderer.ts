@@ -2,17 +2,16 @@
  * Canvas 2D drawing of the board. Pure presentation: it reads the game
  * through its query interface and never decides anything about the rules.
  */
-import { toXY, type Game, type Placement, type Point, type TileKind } from '../engine';
+import { samePoint, toXY, type Game, type Placement, type Point, type TileKind, type TileShape } from '../engine';
 import { DEFAULT_SETTINGS, derivePalette } from '../settings/palette';
 import type { Camera, XY } from './camera';
+import { edgeArc, tileOutline } from './outline';
 import type { TileLayer, View } from './tile-layer';
 
 export interface Palette {
   background: string;
   tiles: Record<TileKind, string>;
   outline: string;
-  arcA: string;
-  arcB: string;
   /** Outline of the pending tile (the one still adjustable). */
   pending: string;
   /** Marks a visible dead end (a boundary edge nothing fits onto). */
@@ -44,7 +43,6 @@ export interface Preview {
 }
 
 export interface Scene {
-  showArcs: boolean;
   /** The pointer is over the pending tile (its wheel/right-click target). */
   pendingHovered: boolean;
   preview: Preview | null;
@@ -86,8 +84,8 @@ export function drawBoard(
   let redrawLater = false;
   if (layer) {
     const painter = (c: CanvasRenderingContext2D, view: View, tile: Placement, pts: XY[]) =>
-      drawTile(c, game, view, palette, tile, pts, scene.showArcs, 1);
-    const style = `${scene.showArcs}|${JSON.stringify(palette)}`;
+      drawTile(c, game, view, palette, tile, pts, 1);
+    const style = JSON.stringify(palette);
     const { snap, wantsRebuild } = layer.sync(game, camera, dpr, painter, style, scene.now ?? performance.now());
     redrawLater = wantsRebuild;
     // shift the whole frame by the layer's sub-pixel snap so overlays line up with the cached tiles
@@ -125,7 +123,7 @@ export function drawBoard(
       const pts = tile.vertices.map(toXY);
       if (pts.every((p) => p.x < min.x - 1) || pts.every((p) => p.x > max.x + 1)) continue;
       if (pts.every((p) => p.y < min.y - 1) || pts.every((p) => p.y > max.y + 1)) continue;
-      drawTile(ctx, game, camera, palette, tile, pts, scene.showArcs, 1);
+      drawTile(ctx, game, camera, palette, tile, pts, 1);
     }
   }
 
@@ -133,9 +131,9 @@ export function drawBoard(
   if (pending) {
     // the pending tile: slightly see-through, with a bold accent outline (thicker while hovered)
     const pts = pending.vertices.map(toXY);
-    drawTile(ctx, game, camera, palette, pending, pts, scene.showArcs, 0.8);
+    drawTile(ctx, game, camera, palette, pending, pts, 0.8);
     ctx.save();
-    tracePolygon(ctx, camera, pts);
+    traceTile(ctx, camera, game.tileSet.shapes[pending.kind]!, pts);
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(scene.pendingHovered ? 3.5 : 2.5, camera.scale * (scene.pendingHovered ? 0.1 : 0.07));
     ctx.strokeStyle = palette.pending;
@@ -164,8 +162,8 @@ export function drawBoard(
   if (scene.preview) {
     const pts = game.verticesOf(scene.preview.placement).map(toXY);
     ctx.save();
-    drawTile(ctx, game, camera, palette, scene.preview.placement, pts, scene.showArcs, 0.55);
-    tracePolygon(ctx, camera, pts);
+    drawTile(ctx, game, camera, palette, scene.preview.placement, pts, 0.55);
+    traceTile(ctx, camera, game.tileSet.shapes[scene.preview.placement.kind]!, pts);
     ctx.setLineDash([6, 4]);
     ctx.lineWidth = 2;
     ctx.strokeStyle = palette.outline;
@@ -181,8 +179,8 @@ export function drawBoard(
 
   if (scene.ghost) {
     ctx.save();
-    drawTile(ctx, game, camera, palette, scene.ghost.placement, scene.ghost.pts, scene.showArcs, 0.4);
-    tracePolygon(ctx, camera, scene.ghost.pts);
+    drawTile(ctx, game, camera, palette, scene.ghost.placement, scene.ghost.pts, 0.4);
+    traceTile(ctx, camera, game.tileSet.shapes[scene.ghost.placement.kind]!, scene.ghost.pts);
     ctx.setLineDash([3, 4]);
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = palette.outline;
@@ -196,8 +194,11 @@ export function drawBoard(
 function drawDeadEnds(ctx: CanvasRenderingContext2D, game: BoardView, camera: Camera, palette: Palette): void {
   const dead = game.deadEnds();
   if (!dead.length) return;
+  const pending = game.pendingTile();
+  const tiles = pending ? [...game.confirmedTiles(), pending] : game.confirmedTiles();
   ctx.save();
   ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   for (const { from, to } of dead) {
     const a = toXY(from);
     const b = toXY(to);
@@ -206,16 +207,13 @@ function drawDeadEnds(ctx: CanvasRenderingContext2D, game: BoardView, camera: Ca
     const n = { x: (b.y - a.y) / len, y: -(b.x - a.x) / len };
     const depth = 0.35 * len;
     const mid = { x: (a.x + b.x) / 2 + n.x * depth, y: (a.y + b.y) / 2 + n.y * depth };
-    tracePolygon(ctx, camera, [a, b, mid]);
+    const edge = [a, ...deadEdgeArc(game, tiles, from, to), b];
+    tracePath(ctx, camera, [...edge, mid]);
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = palette.deadEnd;
     ctx.fill();
     ctx.globalAlpha = 1;
-    const sa = camera.toScreen(a);
-    const sb = camera.toScreen(b);
-    ctx.beginPath();
-    ctx.moveTo(sa.x, sa.y);
-    ctx.lineTo(sb.x, sb.y);
+    tracePath(ctx, camera, edge, false);
     ctx.lineWidth = Math.max(3, camera.scale * 0.09);
     ctx.strokeStyle = palette.deadEnd;
     ctx.stroke();
@@ -223,15 +221,29 @@ function drawDeadEnds(ctx: CanvasRenderingContext2D, game: BoardView, camera: Ca
   ctx.restore();
 }
 
-function tracePolygon(ctx: CanvasRenderingContext2D, camera: View, pts: XY[]): void {
+/** The arc of the tile edge from → to (the inner points), following its tile's outline. */
+function deadEdgeArc(game: BoardView, tiles: readonly { kind: TileKind; vertices: readonly Point[] }[], from: Point, to: Point): XY[] {
+  for (const tile of tiles) {
+    const i = tile.vertices.findIndex((v) => samePoint(v, from));
+    if (i < 0 || !samePoint(tile.vertices[(i + 1) % tile.vertices.length]!, to)) continue;
+    return edgeArc(toXY(from), toXY(to), game.tileSet.shapes[tile.kind]!.corners[i]!.label);
+  }
+  return [];
+}
+
+function tracePath(ctx: CanvasRenderingContext2D, camera: View, pts: XY[], close = true): void {
   ctx.beginPath();
   pts.forEach((p, i) => {
     const s = camera.toScreen(p);
     if (i === 0) ctx.moveTo(s.x, s.y);
     else ctx.lineTo(s.x, s.y);
   });
-  ctx.closePath();
+  if (close) ctx.closePath();
 }
+
+/** Traces a tile's curved outline (see outline.ts). */
+const traceTile = (ctx: CanvasRenderingContext2D, camera: View, shape: TileShape, pts: XY[]) =>
+  tracePath(ctx, camera, tileOutline(shape, pts));
 
 function drawTile(
   ctx: CanvasRenderingContext2D,
@@ -240,39 +252,16 @@ function drawTile(
   palette: Palette,
   placement: Placement,
   pts: XY[],
-  showArcs: boolean,
   alpha: number,
 ): void {
   ctx.save();
   ctx.globalAlpha = alpha;
-  tracePolygon(ctx, camera, pts);
+  traceTile(ctx, camera, game.tileSet.shapes[placement.kind]!, pts);
   ctx.fillStyle = palette.tiles[placement.kind] ?? '#ccc';
   ctx.fill();
   ctx.lineJoin = 'round';
   ctx.lineWidth = Math.max(1, camera.scale * 0.025);
   ctx.strokeStyle = palette.outline;
   ctx.stroke();
-
-  if (showArcs) {
-    const shape = game.tileSet.shapes[placement.kind]!;
-    ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(1.2, camera.scale * 0.06);
-    for (const arc of shape.arcs) {
-      const v = pts[arc.corner]!;
-      const next = pts[(arc.corner + 1) % pts.length]!;
-      const start = Math.atan2(next.y - v.y, next.x - v.x);
-      const sweep = (shape.corners[arc.corner]!.angle * Math.PI) / 5;
-      ctx.beginPath();
-      const steps = 24;
-      for (let k = 0; k <= steps; k++) {
-        const a = start + (sweep * k) / steps;
-        const s = camera.toScreen({ x: v.x + arc.radius * Math.cos(a), y: v.y + arc.radius * Math.sin(a) });
-        if (k === 0) ctx.moveTo(s.x, s.y);
-        else ctx.lineTo(s.x, s.y);
-      }
-      ctx.strokeStyle = arc.family === 'A' ? palette.arcA : palette.arcB;
-      ctx.stroke();
-    }
-  }
   ctx.restore();
 }

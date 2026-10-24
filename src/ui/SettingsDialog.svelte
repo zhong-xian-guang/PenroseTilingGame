@@ -56,17 +56,6 @@
     {/each}
   </div>
 
-  <h3>{t('settings.marks')}</h3>
-  <label class="toggle">
-    <input
-      type="checkbox"
-      checked={settings.showArcs}
-      onchange={(e) => displaySettings.update({ showArcs: e.currentTarget.checked })}
-    />
-    {t('settings.arcs')}
-  </label>
-  <p class="note">{t('settings.arcs.note')}</p>
-
   <form method="dialog">
     <button type="submit" class="close">{t('settings.close')}</button>
   </form>
@@ -155,17 +144,6 @@
     border-radius: 8px;
     background: var(--panel);
     cursor: pointer;
-  }
-  input[type='checkbox'] {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--accent);
-  }
-  .note {
-    margin: 6px 0 0;
-    font-size: 13px;
-    line-height: 1.5;
-    color: var(--muted);
   }
   form {
     display: flex;
