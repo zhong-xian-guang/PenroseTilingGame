@@ -1,0 +1,42 @@
+:root {
+  --bg: #f6f4ef;
+  --panel: #ffffffe6;
+  --ink: #2b3440;
+  --muted: #6b7380;
+  --accent: #3f7fb5;
+  --kite: #7fa6d6;
+  --dart: #ecbc74;
+  color-scheme: light;
+  /* PTG Sans (Latin) and PTG Sans TC (Chinese): subset, renamed LINE Seed, see src/fonts/.
+     Their unicode-ranges do not overlap, so the browser picks per character. */
+  font-family: 'PTG Sans', 'PTG Sans TC', system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  overscroll-behavior: none;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  /* A long press on the HUD, hint or a button must not select its text or open the selection menu
+     (seen on Android Chrome). Dialog text stays selectable. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+dialog :is(p, pre, h2, h3, dd, dt, li) {
+  user-select: text;
+  -webkit-user-select: text;
+}

@@ -4,12 +4,21 @@
 
 **Blocked by:** 01 專案骨架與第一片拼塊
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] zh-TW 與 en 語系檔，介面上可以切換語言
-- [ ] 建置步驟從官方字型（https://seed.line.me/）產生子集，只包含語系檔中出現的字元
-- [ ] 子集的字型名稱表已改成專案名稱，不再叫 LINE Seed Sans 或 LINE Seed TW
-- [ ] 只使用兩者共有的字重（Thin、Regular、Bold、ExtraBold）
-- [ ] 新增介面字串後重新建置，不會缺字
-- [ ] 語系檔中不使用兩套字型都沒有的符號（²、≈、✓）；建置步驟偵測到時發出警告
-- [ ] 關於頁註明字型出處，並附上 OFL 全文
+- [x] zh-TW 與 en 語系檔，介面上可以切換語言
+- [x] 建置步驟從官方字型（https://seed.line.me/）產生子集，只包含語系檔中出現的字元
+- [x] 子集的字型名稱表已改成專案名稱，不再叫 LINE Seed Sans 或 LINE Seed TW
+- [x] 只使用兩者共有的字重（Thin、Regular、Bold、ExtraBold）
+- [x] 新增介面字串後重新建置，不會缺字
+- [x] 語系檔中不使用兩套字型都沒有的符號（²、≈、✓）；建置步驟偵測到時發出警告
+- [x] 關於頁註明字型出處，並附上 OFL 全文
+
+## Comments
+
+- 語系檔：`src/i18n/locales/{zh-TW,en}.json`；`t()` 與語言狀態在 `src/i18n/index.svelte.ts`（偏好存在 localStorage，預設依瀏覽器語言）。右上角有語言切換與「關於」按鈕（`src/ui/Menu.svelte`），關於頁是原生 `<dialog>`。
+- 字型建置：`npm run fonts`（`npm run build` 會先跑它）。字元集取自所有語系檔、`src/fonts/OFL.txt` 與 `scripts/build-fonts.ts` 的 `EXTRA_TEXT`，外加可列印 ASCII（執行時產生的數字）。字元集與 `src/fonts/manifest.json` 相同時沿用已提交的子集；不同時從 seed.line.me 下載官方 zip 到 `.cache/fonts/`，再由 `scripts/subset_fonts.py`（fontTools）子集化、改名為 PTG Sans／PTG Sans TC 並輸出 WOFF2 與 `fonts.css`。因此**改了介面字串的人需要 Python + `pip install fonttools brotli`**；沒有的話建置會失敗並提示，不會悄悄缺字。
+- 名稱表只保留著作權、設計者、授權欄位，移除商標欄位（7）與所有舊名稱。
+- 兩套字型都沒有的字元，建置會逐一警告；`⌂`（置中按鈕）因此改成 SVG 圖示。語系檔中出現 ²、≈、✓ 時，建置警告，`tests/i18n/locales.test.ts` 也會失敗。
+- 環境備註：在含中文字元的路徑（本 repo 的 worktree 路徑）下，Vitest 4/rolldown 的依賴預先打包會失敗（`Could not resolve 'node:module' … Tsconfig not found`），與本票無關；從 ASCII 路徑的 junction 執行即可通過。
+- 刻意偏離（程式碼審查後記錄）：語言偏好存在 localStorage，而不是規格「持久化層」所說的 IndexedDB。原因：第一次繪製前就必須同步知道語言（`<html lang>`、標題、第一畫面的文字），IndexedDB 只能非同步讀取，會造成先顯示錯誤語言再閃換。配色與弧線開關仍存在 IndexedDB（`src/storage/settings.ts`）。

@@ -1,0 +1,18 @@
+{
+  // Type-checks the rules engine with no DOM types and no Svelte, so any
+  // accidental dependency on the browser or the UI fails the build.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/engine/**/*.ts"]
+}

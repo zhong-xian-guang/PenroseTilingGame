@@ -1,0 +1,33 @@
+{
+  "name": "penrose-tiling-game",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run fonts && npm run check && vite build",
+    "fonts": "node scripts/build-fonts.ts",
+    "preview": "vite preview",
+    "build:bench": "npm run check && vite build --mode bench",
+    "preview:bench": "vite preview --mode bench",
+    "device:touch": "node scripts/device/touch.mjs",
+    "device:pwa": "node scripts/device/pwa.mjs",
+    "device:perf": "node scripts/device/perf.mjs",
+    "icons": "pwa-assets-generator",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc -p tsconfig.engine.json && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@number-flow/svelte": "^0.4.2",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tsconfig/svelte": "^5.0.8",
+    "@vite-pwa/assets-generator": "^1.0.4",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^4.1.11"
+  }
+}

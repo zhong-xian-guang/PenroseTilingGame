@@ -2,6 +2,8 @@ node_modules/
 dist/
 build/
 coverage/
+# Official font downloads used by scripts/build-fonts.ts
+.cache/
 .env
 .env.*
 !.env.example
@@ -13,3 +15,4 @@ Thumbs.db
 
 # Third-party agent skills (installed locally, not versioned)
 .claude/skills/
+dist-bench/
