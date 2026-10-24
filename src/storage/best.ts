@@ -7,6 +7,7 @@
  */
 import type { Score } from '../engine';
 import { openDb } from './autosave';
+import { req } from './idb';
 
 export interface BestComparison {
   /** The best before this game, or null if this is the first finished game of the tile set. */
@@ -24,29 +25,40 @@ export function compareWithBest(previous: Score | null, score: Score): BestCompa
 
 const keyOf = (tileSet: string) => `best:${tileSet}`;
 
-const req = <T>(r: IDBRequest<T>): Promise<T> =>
-  new Promise((resolve, reject) => {
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
+async function storedBest(db: IDBDatabase, tileSet: string): Promise<Score | null> {
+  return ((await req(db.transaction('meta').objectStore('meta').get(keyOf(tileSet)))) as Score | undefined) ?? null;
+}
 
 /**
- * Compares a finished game's score with the stored best of its tile set and
- * stores it if it is a new best. Resolves to a comparison against nothing when
- * IndexedDB is unavailable. (Resuming a finished game submits it again: it then
- * equals the stored best and is not reported as new.)
+ * Compares a just-finished game's score with the stored best of its tile set
+ * and stores it if it is a new best. Submit each finished game once (a game
+ * resumed already over uses `lookupBest`). Resolves to null when the best
+ * cannot be read or a new best cannot be stored (IndexedDB unavailable or
+ * failing): nothing is claimed that was not saved.
  */
-export async function submitScore(tileSet: string, score: Score): Promise<BestComparison> {
-  let previous: Score | null = null;
+export async function submitScore(tileSet: string, score: Score): Promise<BestComparison | null> {
   try {
     const db = await openDb();
-    previous = ((await req(db.transaction('meta').objectStore('meta').get(keyOf(tileSet)))) as Score | undefined) ?? null;
-    const result = compareWithBest(previous, score);
+    const result = compareWithBest(await storedBest(db, tileSet), score);
     if (result.isNewBest) {
       await req(db.transaction('meta', 'readwrite').objectStore('meta').put({ ...score }, keyOf(tileSet)));
     }
     return result;
   } catch {
-    return compareWithBest(previous, score);
+    return null;
+  }
+}
+
+/**
+ * The comparison for a game whose score was already submitted when it ended
+ * (reopened after a reload): read only, never a new best. Null when storage is
+ * unavailable or nothing is stored.
+ */
+export async function lookupBest(tileSet: string): Promise<BestComparison | null> {
+  try {
+    const best = await storedBest(await openDb(), tileSet);
+    return best ? { previous: best, best, isNewBest: false } : null;
+  } catch {
+    return null;
   }
 }

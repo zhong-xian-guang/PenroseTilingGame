@@ -8,18 +8,13 @@
  * The language choice stays in localStorage (see src/i18n): it must be known
  * synchronously before the first render.
  */
+import { req } from './idb';
 import { DEFAULT_SETTINGS, normalizeSettings, type Settings } from '../settings/palette';
 
 const DB_NAME = 'penrose-tiling-settings';
 const DB_VERSION = 1;
 const STORE = 'settings';
 const KEY = 'display';
-
-const req = <T>(r: IDBRequest<T>): Promise<T> =>
-  new Promise((resolve, reject) => {
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 function openDb(): Promise<IDBDatabase> {
