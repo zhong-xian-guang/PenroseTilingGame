@@ -5,12 +5,14 @@
  * this ring, so rule decisions never depend on floating point.
  * φ² = φ + 1 gives the multiplication rule below.
  */
+import { PHI } from './real';
+
 export interface ZPhi {
   readonly a: number;
   readonly b: number;
 }
 
-export const PHI = (1 + Math.sqrt(5)) / 2;
+export { PHI };
 
 export const zphi = (a: number, b = 0): ZPhi => ({ a, b });
 

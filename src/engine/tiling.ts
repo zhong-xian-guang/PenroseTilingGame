@@ -23,6 +23,7 @@
  */
 import { edgeDirection, placementOnSegment, placementVertices, type Placement } from './geometry';
 import { mod10, orient, pointKey, strictlyInsideSegment, toXY, type Point } from './point';
+import { dist, dist2 } from './real';
 import { shapeOf, type TileKind, type TileSet } from './tileset';
 import { eq } from './zphi';
 
@@ -121,17 +122,23 @@ export interface Disc {
   readonly r: number;
 }
 
-/** Does the segment a–b come within the disc (floating point; distance from the centre ≤ r)? */
+/**
+ * Does the segment a–b come within the disc (distance from the centre ≤ r)?
+ * A rule decision computed in floating point, so only with IEEE-754-exact
+ * operations (no Math.hypot), comparing squared distances: bit-identical on
+ * every platform (ADR 0002).
+ */
 function segmentReachesDisc(a: Point, b: Point, d: Disc): boolean {
   const p = toXY(a);
   const q = toXY(b);
   const dx = q.x - p.x;
   const dy = q.y - p.y;
   const t = Math.max(0, Math.min(1, ((d.x - p.x) * dx + (d.y - p.y) * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(p.x + t * dx - d.x, p.y + t * dy - d.y) <= d.r;
+  return d.r >= 0 && dist2({ x: p.x + t * dx, y: p.y + t * dy }, d) <= d.r * d.r;
 }
 
-const edgeKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+/** Canonical key of the edge between two point keys (either order). */
+export const edgeKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 export const placementKey = (p: Placement): string => `${p.kind}@${pointKey(p.origin)}/${mod10(p.dir)}`;
 
@@ -234,9 +241,8 @@ export class Tiling {
    */
   private changedNear(rec: TileRecord, added: boolean): void {
     this.candidateCache = new Map();
-    const { x, y } = rec.center;
     for (const [ek, entry] of this.edgeCache) {
-      if (Math.hypot(entry.mid.x - x, entry.mid.y - y) > INVALIDATE_RADIUS) continue;
+      if (dist2(entry.mid, rec.center) > INVALIDATE_RADIUS * INVALIDATE_RADIUS) continue;
       if (!added || !this.boundary.has(ek)) {
         this.edgeCache.delete(ek);
         continue;
@@ -334,7 +340,7 @@ export class Tiling {
     const box = boxOf(vertices);
     const xy = vertices.map(toXY);
     for (const other of this.tilesNear(center)) {
-      if (Math.hypot(other.center.x - center.x, other.center.y - center.y) > NEAR_RADIUS) continue;
+      if (dist2(other.center, center) > NEAR_RADIUS * NEAR_RADIUS) continue;
       if (boxesApart(box, other.box)) continue;
       const otherShape = shapeOf(ts, other.placement.kind);
       for (const t1 of shape.triangles) {
@@ -534,7 +540,7 @@ function clearlySeparated(ta: readonly number[], xa: readonly XY[], tb: readonly
   for (let i = 0; i < ta.length; i++) {
     const p = xa[ta[i]!]!;
     const q = xa[ta[(i + 1) % ta.length]!]!;
-    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    const len = dist(p, q);
     if (tb.every((k) => crossXY(p, q, xb[k]!) < -FLOAT_MARGIN * len)) return true;
   }
   return false;
@@ -564,7 +570,7 @@ function hasTJunction(a: readonly Point[], xa: readonly XY[], b: readonly Point[
 
 /** Is `p` clearly (float, with margin) off segment a–b: away from its line, or beyond an end? */
 function clearlyOffSegment(p: XY, a: XY, b: XY): boolean {
-  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  const len = dist(a, b);
   if (Math.abs(crossXY(a, b, p)) > FLOAT_MARGIN * len) return true;
   const t = (p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y);
   return t < -FLOAT_MARGIN * len || t > len * len + FLOAT_MARGIN * len;

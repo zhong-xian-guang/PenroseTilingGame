@@ -9,7 +9,8 @@
  * Because e₀ × e₁ = sin 36° > 0, the sign of a cross product reduces to the
  * sign of an ℤ[φ] number; no floating point is used for any decision.
  */
-import { PHI, Z0, Z1, ZPHI, add, eq, mul, neg, sign, sub, toNumber, zphi, type ZPhi } from './zphi';
+import { COS36, SIN36 } from './real';
+import { Z0, Z1, ZPHI, add, eq, mul, neg, sign, sub, toNumber, zphi, type ZPhi } from './zphi';
 
 export interface Point {
   readonly u: ZPhi;
@@ -64,9 +65,6 @@ export function strictlyInsideSegment(p: Point, a: Point, b: Point): boolean {
   const s2 = sign(sub(along(b), along(p)));
   return s1 !== 0 && s1 === s2;
 }
-
-const COS36 = PHI / 2;
-const SIN36 = Math.sin(Math.PI / 5);
 
 /** Floating-point Cartesian coordinates, for drawing and hit-testing only. */
 export function toXY(p: Point): { x: number; y: number } {

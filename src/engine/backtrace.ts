@@ -16,6 +16,7 @@
  */
 import { replayWith } from './game';
 import { toXY, type Point } from './point';
+import { dist2 } from './real';
 import type { GameRecord } from './record';
 import { Tiling, type EdgeOwner } from './tiling';
 import { BACKTRACE_MAX_FORCED } from './tuning';
@@ -51,7 +52,7 @@ class Propagator {
   add(placement: Parameters<Tiling['add']>[0]): void {
     const rec = this.tiling.add(placement);
     for (const [key, mid] of this.roomy) {
-      if (Math.hypot(mid.x - rec.center.x, mid.y - rec.center.y) <= INFLUENCE) this.roomy.delete(key);
+      if (dist2(mid, rec.center) <= INFLUENCE * INFLUENCE) this.roomy.delete(key);
     }
   }
 

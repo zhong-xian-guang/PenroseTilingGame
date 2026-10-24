@@ -4,11 +4,13 @@
  */
 import { edgeDirection, placementVertices, type Placement } from './geometry';
 import { P2 } from './p2';
-import { DIRECTIONS, mod10, ORIGIN, pointKey, toXY, type Point } from './point';
+import { crossSign, DIRECTIONS, minus, mod10, ORIGIN, plus, pointKey, scale, toXY, type Point } from './point';
+import { dist, dist2 } from './real';
 import type { GameRecord, PlayMode, RecordStep } from './record';
 import { centerOf, placementKey, Tiling } from './tiling';
 import { shapeOf, type CornerRef, type TileKind, type TileSet } from './tileset';
 import { FLOW_NEAR_RADIUS, GROWTH_MARGIN } from './tuning';
+import { sign, zphi } from './zphi';
 
 export interface PlacedTile extends Placement {
   readonly id: number;
@@ -193,6 +195,19 @@ export type GameEvent =
   | { readonly type: 'mode-changed' }
   | { readonly type: 'game-over' };
 
+/**
+ * Exact counter-clockwise order of two non-zero direction vectors by their
+ * angle in [0, 2π) (no atan2): first by half-plane (y = v·sin 36°, so the
+ * sign of y is the sign of v), then by the sign of the cross product.
+ */
+function compareAngles(a: Point, b: Point): number {
+  const half = (w: Point) => {
+    const sv = sign(w.v);
+    return sv > 0 || (sv === 0 && sign(w.u) > 0) ? 0 : 1;
+  };
+  return half(a) - half(b) || -crossSign(a, b);
+}
+
 /** Name of the atlas entry equal to `corners` up to cyclic rotation, if any. */
 function classify(tileSet: TileSet, corners: readonly CornerRef[]): string | null {
   const sig = (cs: readonly CornerRef[]) => cs.map((c) => `${c.kind}:${c.corner}`);
@@ -234,7 +249,7 @@ function addToShoelace(sum: Shoelace, vertices: readonly Point[]): void {
   sum.tiles++;
 }
 
-/** Growth circle from shoelace sums: area-weighted centroid, radius √(area / π) + margin. */
+/** Growth circle from shoelace sums: area-weighted centroid, radius √(area / π) + margin (IEEE-exact ops only, ADR 0002). */
 function growthCircleOf({ area, cx, cy }: Shoelace, margin: number): GrowthCircle {
   const center = area > 0 ? { x: cx / area, y: cy / area } : { x: 0, y: 0 };
   return { center, radius: Math.sqrt(area / Math.PI) + margin };
@@ -375,14 +390,14 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
     for (const [key, n] of options) {
       const rec = tiling.vertex(key)!;
       const at = toXY(rec.point);
-      if (Math.hypot(at.x - center.x, at.y - center.y) > radius) continue;
+      if (radius < 0 || dist2(at, center) > radius * radius) continue;
       const filled = rec.corners.reduce((s, { tileId, corner }) => {
         const kind = tiling.tiles[tileId]!.placement.kind;
         return s + shapeOf(tileSet, kind).corners[corner]!.angle;
       }, 0);
       open.push({
         spot: { position: rec.point, options: n },
-        d: Math.hypot(at.x - ref.x, at.y - ref.y),
+        d: dist(at, ref),
         concave: 2 * filled > DIRECTIONS,
       });
     }
@@ -400,17 +415,16 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
 
   const orientationsAt = (position: Point, kind: TileKind): Placement[] => {
     const key = pointKey(position);
-    const at = toXY(position);
-    const angleOf = (p: Placement) => {
-      const c = centerOf(placementVertices(tileSet, p));
-      const a = Math.atan2(c.y - at.y, c.x - at.x);
-      return a < 0 ? a + 2 * Math.PI : a;
+    // exact: the direction from `position` to the tile's centre, scaled by the corner count
+    const towardsCentre = (p: Placement): Point => {
+      const vs = placementVertices(tileSet, p);
+      return minus(vs.reduce(plus, ORIGIN), scale(zphi(vs.length), position));
     };
     return tiling
       .candidates(kind)
       .filter((p) => placementVertices(tileSet, p).some((v) => pointKey(v) === key))
-      .map((p) => ({ p, a: angleOf(p) }))
-      .sort((x, y) => x.a - y.a)
+      .map((p) => ({ p, w: towardsCentre(p) }))
+      .sort((x, y) => compareAngles(x.w, y.w))
       .map(({ p }) => p);
   };
 
@@ -496,15 +510,14 @@ function build(options: GameOptions): { game: Game; apply: (step: RecordStep) =>
       let best: { p: Placement; d: number } | null = null;
       for (const p of tiling.candidates(kind)) {
         const c = centerOf(placementVertices(tileSet, p));
-        const d = Math.hypot(c.x - at.x, c.y - at.y);
+        const d = dist(c, at);
         if (d <= maxDistance && (!best || d < best.d)) best = { p, d };
       }
       if (!best) return null;
       const picked = best.p;
       const onTiling = placementVertices(tileSet, picked).filter((v) => tiling.vertex(pointKey(v)));
       const distTo = (v: Point) => {
-        const q = toXY(v);
-        return Math.hypot(q.x - at.x, q.y - at.y);
+        return dist(toXY(v), at);
       };
       const position = onTiling.reduce((a, b) => (distTo(b) < distTo(a) ? b : a));
       const orientations = orientationsAt(position, kind);

@@ -11,6 +11,8 @@
 import { placementVertices, type Placement } from './geometry';
 import { P2 } from './p2';
 import { DIRECTIONS, ORIGIN, minus, plus, pointKey, samePoint, scale, toXY, unit, type Point } from './point';
+import { dist2, PHI } from './real';
+import { edgeKey } from './tiling';
 import type { TileKind } from './tileset';
 import { Z1, ZPHI, mul, zphi, type ZPhi } from './zphi';
 
@@ -106,7 +108,7 @@ function getReference(): Reference {
     const vs = placementVertices(P2, t).map(pointKey);
     vs.forEach((a, j) => {
       const b = vs[(j + 1) % vs.length]!;
-      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      const key = edgeKey(a, b);
       const list = byEdge.get(key);
       if (list) list.push(i);
       else byEdge.set(key, [i]);
@@ -119,10 +121,10 @@ function getReference(): Reference {
     neighbours[list[1]!]!.push(list[0]!);
   }
   let radius = 1;
-  for (let i = 0; i <= DEFLATIONS; i++) radius *= (1 + Math.sqrt(5)) / 2;
+  for (let i = 0; i <= DEFLATIONS; i++) radius *= PHI;
   const starts = tiles
     .map((t, i) => ({ i, at: toXY(t.origin) }))
-    .filter(({ at }) => Math.hypot(at.x, at.y) < radius / 2)
+    .filter(({ at }) => dist2(at, { x: 0, y: 0 }) < (radius / 2) * (radius / 2))
     .map(({ i }) => i);
   reference = { tiles, neighbours, starts };
   return reference;

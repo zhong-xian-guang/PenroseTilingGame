@@ -12,11 +12,8 @@
  * labelled 'H'; the rest are 'T'. Glued edges must also have equal length.
  */
 import { Z1, ZPHI } from './zphi';
+import { PHI, SIN36, SIN72 } from './real';
 import type { TileSet, TileShape, VertexConfiguration } from './tileset';
-
-const SIN36 = Math.sin(Math.PI / 5);
-const SIN72 = Math.sin((2 * Math.PI) / 5);
-const PHI = (1 + Math.sqrt(5)) / 2;
 
 const LONG = { length: ZPHI, label: 'long' } as const;
 const SHORT = { length: Z1, label: 'short' } as const;
