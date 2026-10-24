@@ -4,14 +4,14 @@
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 盤面、待定拼塊、預覽、拖曳中的拼塊都用弧形外框
 - [x] 托盤圖示用弧形外框
 - [x] 回放與分析頁的盤面一致
 - [x] 圖塊快取的外框餘裕涵蓋弧的凸出量
 - [x] 移除「顯示弧線」設定與 Conway 弧線的繪製；已存的設定裡殘留的 `showArcs` 欄位讀取時忽略，不報錯
-- [ ] Android 實機上確認觀感與拖放手感
+- [x] Android 實機上確認觀感與拖放手感
 
 ## Notes
 
@@ -24,4 +24,7 @@
 ## Comments
 
 **實作（2026-10-24，分支 `feat/curved-edges`）**：`src/board/outline.ts` 的 `tileOutline` / `edgeArc`，測試在 `tests/board/outline.test.ts`（用引擎產生的真實鋪砌驗證：相鄰兩片在共用邊上的弧重合、掉頭的拼塊對不上、外框通過每個角）。點擊與懸停判定也改用弧形外框，死路標示和回放的「關鍵一步」外框沿弧形邊畫。引擎沒有改動；`TileShape.arcs` 資料現在沒有地方使用，但保留。電腦上以 Edge 手機尺寸截圖確認過棋盤、托盤與死路標示。Android 實機尚未驗證：測試時手機停在鎖定畫面。
+
+**Android 實機（2026-10-24）**：ZenFone 5Z，production build（`vite build` + `vite preview`，`adb reverse tcp:4173`），`npm run device:touch` 12 項全部通過；截圖確認弧形外框、待定拼塊的紅框與托盤圖示都正確。第一次執行時「心流模式：拖出拼塊放下」失敗，原因是那局隨機開局的推薦位置放不下風箏（畫面提示「這種拼塊放不進推薦位置」），測試固定拖風箏所以沒放下；重跑一次通過。這是測試腳本依賴隨機開局的既有問題，與本票無關。
+另：`npm run build` 的字型子集化步驟（`scripts/subset_fonts.py`）在這台電腦上讀 `.cache/fonts/*.zip` 時路徑中文編碼出錯而失敗，與本票無關；本票沒有新增文字，沿用已提交的字型檔，直接 `vite build`。
 
