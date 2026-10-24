@@ -21,3 +21,4 @@
 - 名稱表只保留著作權、設計者、授權欄位，移除商標欄位（7）與所有舊名稱。
 - 兩套字型都沒有的字元，建置會逐一警告；`⌂`（置中按鈕）因此改成 SVG 圖示。語系檔中出現 ²、≈、✓ 時，建置警告，`tests/i18n/locales.test.ts` 也會失敗。
 - 環境備註：在含中文字元的路徑（本 repo 的 worktree 路徑）下，Vitest 4/rolldown 的依賴預先打包會失敗（`Could not resolve 'node:module' … Tsconfig not found`），與本票無關；從 ASCII 路徑的 junction 執行即可通過。
+- 刻意偏離（程式碼審查後記錄）：語言偏好存在 localStorage，而不是規格「持久化層」所說的 IndexedDB。原因：第一次繪製前就必須同步知道語言（`<html lang>`、標題、第一畫面的文字），IndexedDB 只能非同步讀取，會造成先顯示錯誤語言再閃換。配色與弧線開關仍存在 IndexedDB（`src/storage/settings.ts`）。
